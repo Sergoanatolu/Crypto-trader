@@ -3,6 +3,6 @@ import { defineConfig } from 'vite'
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: '/crypto-traders-app/',
+  base: '/Crypto-trader/',
   plugins: [react()],
 })
