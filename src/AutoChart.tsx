@@ -3,6 +3,8 @@ import { CandlestickSeries, ColorType, createChart, HistogramSeries, LineSeries 
 import type { ISeriesApi, UTCTimestamp } from 'lightweight-charts'
 import { dayStart, findLevels, kyivDay } from './levels'
 import type { Bar } from './levels'
+import { DrawingTools } from './DrawingTools'
+import type { DrawingChart } from './DrawingTools'
 
 const frames = ['1m', '5m', '15m', '1H', '4H', '1D', '1W']
 
@@ -20,6 +22,7 @@ async function fetchBars(symbol: string, frame: string, signal: AbortSignal, end
 
 export function AutoChart({ symbol }: { symbol: string }) {
   const container = useRef<HTMLDivElement>(null)
+  const [drawingApi, setDrawingApi] = useState<(DrawingChart & { identity: string }) | null>(null)
   const [frame, setFrame] = useState('5m')
   const [day, setDay] = useState(kyivDay)
   const [retry, setRetry] = useState(0)
@@ -59,6 +62,8 @@ export function AutoChart({ symbol }: { symbol: string }) {
       crosshair: { mode: 0 },
     })
     const candles = chart.addSeries(CandlestickSeries, { upColor: '#66c49b', downColor: '#dc7e79', borderVisible: false, wickUpColor: '#66c49b', wickDownColor: '#dc7e79' })
+    const duration = frame === '1W' ? 604800 : frame === '1D' ? 86400 : frame.endsWith('H') ? Number.parseInt(frame) * 3600 : Number.parseInt(frame) * 60
+    setDrawingApi({ chart, candles, duration, identity: `${symbol}-${frame}-${day}-${retry}` })
     const volumes = chart.addSeries(HistogramSeries, { priceFormat: { type: 'volume' }, priceScaleId: '' })
     volumes.priceScale().applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } })
     lines.current = []
@@ -142,5 +147,6 @@ export function AutoChart({ symbol }: { symbol: string }) {
     <div className="local-chart-tools"><strong>{symbol}</strong><div className="chart-timeframes">{frames.map((value) => <button key={value} className={frame === value ? 'tool-active' : ''} onClick={() => setFrame(value)}>{value}</button>)}</div><button aria-pressed={showLevels} className={showLevels ? 'tool-active' : ''} onClick={() => setShowLevels((value) => !value)}>Авто рівні</button></div>
     <div className="levels-status" role="status"><span className="level-high">● Максимуми</span><span className="level-low">● Мінімуми</span><span>{status}</span>{error && <button onClick={() => setRetry((value) => value + 1)}>Повторити</button>}</div>
     <div className="local-chart" ref={container} />
+    {drawingApi?.identity === `${symbol}-${frame}-${day}-${retry}` && <DrawingTools key={drawingApi.identity} api={drawingApi} storageKey={`vanta-drawings-v2-${symbol}`} />}
   </div>
 }

@@ -21,4 +21,14 @@ footer { height:41px; border-top:1px solid var(--line); padding:0 28px; display:
 .levels-status { height:38px; display:flex; align-items:center; gap:16px; padding:0 12px; font-size:10px; color:var(--muted); overflow-x:auto; white-space:nowrap; }
 .level-high { color:#3868ff; }.level-low { color:#24b7a5; }
 .levels-status button { background:#29251f; color:var(--orange); border:0; padding:5px 10px; cursor:pointer; }
+.auto-chart-shell .local-chart { left:54px; }
+.drawing-toolbar { position:absolute; top:82px; left:0; bottom:0; width:53px; display:flex; flex-direction:column; align-items:center; gap:7px; padding:12px 0; border-right:1px solid #303332; background:#101212; overflow-y:auto; z-index:3; }
+.drawing-toolbar button { width:39px; height:39px; flex-shrink:0; display:grid; place-items:center; border:0; border-radius:5px; background:transparent; color:#b5b9b7; cursor:pointer; }
+.drawing-toolbar button:hover,.drawing-toolbar button.active { background:#303534; color:#fff; }
+.drawing-toolbar button:disabled { opacity:.3; cursor:default; }
+.drawing-toolbar input[type=color] { width:30px; height:30px; padding:2px; border:0; background:transparent; cursor:pointer; flex-shrink:0; }
+.drawing-toolbar select { width:46px; background:#1c201f; color:#ccd0ce; border:1px solid #343a37; border-radius:4px; padding:4px 0; font-size:11px; }
+.drawing-divider { width:29px; border-top:1px solid #303332; margin:4px 0; }
+.manual-drawing-canvas { position:absolute; left:54px; top:82px; z-index:2; touch-action:none; cursor:crosshair; }
+.drawing-hint { position:absolute; top:90px; left:66px; z-index:4; pointer-events:none; padding:7px 10px; border:1px solid #323b37; border-radius:4px; background:#18201fe8; color:#c7d1ca; font-size:11px; }
 @media (max-width:760px) { .workspace { display:flex; flex-direction:column; }.sidebar { height:220px; flex:none; box-sizing:border-box; }.side-title { padding-bottom:0; }.search-box { margin:8px 0; }.market-list { max-height:105px; }.content { flex:1; min-height:0; }.tradingview-panel { height:100%; } }
