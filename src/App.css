@@ -16,3 +16,9 @@ footer { height:41px; border-top:1px solid var(--line); padding:0 28px; display:
 .price-up,.price-down { display:inline-block; border-radius:3px; padding:1px 3px; animation-duration:.65s; animation-timing-function:ease-out; }.price-up { animation-name:price-rise; }.price-down { animation-name:price-fall; } @keyframes price-rise { 0% { background:rgba(102,196,155,.5); color:#effff7; } 100% { background:transparent; } } @keyframes price-fall { 0% { background:rgba(220,126,121,.55); color:#fff1f0; } 100% { background:transparent; } }
 .app-shell { height:100vh; overflow:hidden; }.workspace { height:100vh; min-height:0; }.sidebar { overflow:hidden; }.market-list { max-height:calc(100vh - 190px); overflow-y:auto; scrollbar-width:thin; scrollbar-color:#3c3f3b transparent; }.market-list::-webkit-scrollbar { width:5px; }.market-list::-webkit-scrollbar-thumb { background:#3c3f3b; }
 .sidebar { padding-top:8px; }
+.auto-chart-shell .local-chart-tools { height:44px; overflow-x:auto; white-space:nowrap; }
+.auto-chart-shell .local-chart { top:82px; }
+.levels-status { height:38px; display:flex; align-items:center; gap:16px; padding:0 12px; font-size:10px; color:var(--muted); overflow-x:auto; white-space:nowrap; }
+.level-high { color:#3868ff; }.level-low { color:#24b7a5; }
+.levels-status button { background:#29251f; color:var(--orange); border:0; padding:5px 10px; cursor:pointer; }
+@media (max-width:760px) { .workspace { display:flex; flex-direction:column; }.sidebar { height:220px; flex:none; box-sizing:border-box; }.side-title { padding-bottom:0; }.search-box { margin:8px 0; }.market-list { max-height:105px; }.content { flex:1; min-height:0; }.tradingview-panel { height:100%; } }
