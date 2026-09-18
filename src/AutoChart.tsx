@@ -5,6 +5,7 @@ import { dayStart, findLevels, kyivDay } from './levels'
 import type { Bar } from './levels'
 import { DrawingTools } from './DrawingTools'
 import type { DrawingChart } from './DrawingTools'
+import { formatPrice } from './prices'
 
 const frames = ['1m', '5m', '15m', '1H', '4H', '1D', '1W']
 
@@ -20,7 +21,7 @@ async function fetchBars(symbol: string, frame: string, signal: AbortSignal, end
   })
 }
 
-export function AutoChart({ symbol }: { symbol: string }) {
+export function AutoChart({ symbol, onPrice }: { symbol: string; onPrice: (symbol: string, price: number) => void }) {
   const container = useRef<HTMLDivElement>(null)
   const [drawingApi, setDrawingApi] = useState<(DrawingChart & { identity: string }) | null>(null)
   const [frame, setFrame] = useState('5m')
@@ -55,6 +56,7 @@ export function AutoChart({ symbol }: { symbol: string }) {
     let readyStatus = ''
     const chart = createChart(container.current, {
       autoSize: true,
+      localization: { priceFormatter: formatPrice },
       layout: { background: { type: ColorType.Solid, color: '#111313' }, textColor: '#aaa69b' },
       grid: { vertLines: { color: '#242725' }, horzLines: { color: '#242725' } },
       rightPriceScale: { borderColor: '#282a29', scaleMargins: { top: 0.08, bottom: 0.2 } },
@@ -79,6 +81,7 @@ export function AutoChart({ symbol }: { symbol: string }) {
           const bar: Bar = { time: Number(k.t) / 1000, open: Number(k.o), high: Number(k.h), low: Number(k.l), close: Number(k.c), volume: Number(k.v) }
           if (!Object.values(bar).every(Number.isFinite) || bar.time < lastTime) return
           candles.update({ ...bar, time: bar.time as UTCTimestamp })
+          onPrice(symbol, bar.close)
           volumes.update(volume(bar))
           if (bar.time > lastTime) lines.current.forEach((line) => {
             const first = line.data()[0]
@@ -122,6 +125,7 @@ export function AutoChart({ symbol }: { symbol: string }) {
         const priceFormat = { type: 'price' as const, precision: Math.max(0, -Math.round(Math.log10(minMove))), minMove }
         candles.applyOptions({ priceFormat })
         candles.setData(all.map((bar) => ({ ...bar, time: bar.time as UTCTimestamp })))
+        onPrice(symbol, all[all.length - 1].close)
         volumes.setData(all.map(volume))
         lastTime = all[all.length - 1].time
         const levels = findLevels(history)
@@ -141,7 +145,7 @@ export function AutoChart({ symbol }: { symbol: string }) {
     }
     void load()
     return () => { stopped = true; controller.abort(); clearTimeout(reconnect); socket?.close(); lines.current = []; chart.remove() }
-  }, [symbol, frame, day, retry])
+  }, [symbol, frame, day, retry, onPrice])
 
   return <div className="local-chart-shell auto-chart-shell">
     <div className="local-chart-tools"><strong>{symbol}</strong><div className="chart-timeframes">{frames.map((value) => <button key={value} className={frame === value ? 'tool-active' : ''} onClick={() => setFrame(value)}>{value}</button>)}</div><button aria-pressed={showLevels} className={showLevels ? 'tool-active' : ''} onClick={() => setShowLevels((value) => !value)}>Авто рівні</button></div>

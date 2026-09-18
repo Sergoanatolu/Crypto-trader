@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Filter, Search, Star } from 'lucide-react'
 import { AutoChart } from './AutoChart'
+import { formatPrice } from './prices'
 import './App.css'
 
 type Market = { symbol: string; name: string; price: string; change: number; favorite?: boolean; pulse?: number; direction?: 'up' | 'down' }
@@ -18,6 +19,13 @@ function App() {
   const [marketData, setMarketData] = useState(fallbackMarkets)
   const [selected, setSelected] = useState('BTCUSDT')
   const [query, setQuery] = useState('')
+  const [chartQuote, setChartQuote] = useState<{ symbol: string; price: number; pulse: number; direction: 'up' | 'down' } | null>(null)
+  const handleChartPrice = useCallback((symbol: string, price: number) => {
+    setChartQuote((previous) => {
+      if (previous?.symbol === symbol && previous.price === price) return previous
+      return { symbol, price, pulse: Date.now(), direction: previous?.symbol === symbol && price < previous.price ? 'down' : 'up' }
+    })
+  }, [])
 
   useEffect(() => {
     const loadMarkets = async () => {
@@ -53,7 +61,9 @@ function App() {
     return () => socket.close()
   }, [])
 
-  const filteredMarkets = useMemo(() => marketData.filter((market) => `${market.symbol} ${market.name}`.toLowerCase().includes(query.toLowerCase())).sort((first, second) => Number(second.favorite) - Number(first.favorite)), [marketData, query])
+  const filteredMarkets = useMemo(() => marketData.map((market) => market.symbol === selected && chartQuote?.symbol === selected
+    ? { ...market, price: formatPrice(chartQuote.price), pulse: chartQuote.pulse, direction: chartQuote.direction }
+    : market).filter((market) => `${market.symbol} ${market.name}`.toLowerCase().includes(query.toLowerCase())).sort((first, second) => Number(second.favorite) - Number(first.favorite)), [marketData, query, selected, chartQuote])
   const toggleFavorite = (symbol: string) => setMarketData((current) => current.map((market) => market.symbol === symbol ? { ...market, favorite: !market.favorite } : market))
 
   useEffect(() => {
@@ -81,7 +91,7 @@ function App() {
           </div>
         </aside>
         <section className="content">
-          <div className="chart-panel tradingview-panel"><AutoChart symbol={selected} /></div>
+          <div className="chart-panel tradingview-panel"><AutoChart symbol={selected} onPrice={handleChartPrice} /></div>
         </section>
       </section>
     </main>
