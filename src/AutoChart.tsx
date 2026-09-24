@@ -6,6 +6,7 @@ import type { Bar } from './levels'
 import { DrawingTools } from './DrawingTools'
 import type { DrawingChart } from './DrawingTools'
 import { formatPrice } from './prices'
+import { OrderBookDepth } from './OrderBookDepth'
 
 const frames = ['1m', '5m', '15m', '1H', '4H', '1D', '1W']
 const volumeFormatter = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 8 })
@@ -162,6 +163,7 @@ export function AutoChart({ symbol, onPrice }: { symbol: string; onPrice: (symbo
     <div className="local-chart-tools"><strong>{symbol}</strong><div className="chart-timeframes">{frames.map((value) => <button key={value} className={frame === value ? 'tool-active' : ''} onClick={() => setFrame(value)}>{value}</button>)}</div><button aria-pressed={showLevels} className={showLevels ? 'tool-active' : ''} onClick={() => setShowLevels((value) => !value)}>Авто рівні</button></div>
     <div className="levels-status" role="status"><span className="candle-volume">Обсяг: {hoveredVolume === null ? '—' : `${volumeFormatter.format(hoveredVolume)} ${symbol.replace(/USDT$/, '')}`}</span><span className="level-high">● Максимуми</span><span className="level-low">● Мінімуми</span><span>{status}</span>{error && <button onClick={() => setRetry((value) => value + 1)}>Повторити</button>}</div>
     <div className="local-chart" ref={container} />
+    <OrderBookDepth key={symbol} symbol={symbol} />
     {drawingApi?.identity === `${symbol}-${frame}-${day}-${retry}` && <DrawingTools key={drawingApi.identity} api={drawingApi} storageKey={`vanta-drawings-v2-${symbol}`} />}
   </div>
 }

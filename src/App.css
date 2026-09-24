@@ -21,6 +21,13 @@ footer { height:41px; border-top:1px solid var(--line); padding:0 28px; display:
 .levels-status { height:38px; display:flex; align-items:center; gap:16px; padding:0 12px; font-size:10px; color:var(--muted); overflow-x:auto; white-space:nowrap; }
 .level-high { color:#3868ff; }.level-low { color:#24b7a5; }
 .candle-volume { color:var(--cream); min-width:180px; font-variant-numeric:tabular-nums; }
+.order-book-depth { position:absolute; bottom:38px; left:66px; z-index:5; width:340px; max-width:calc(100% - 150px); max-height:calc(100% - 135px); overflow:auto; border:1px solid #343a37; border-radius:6px; background:#141817f5; box-shadow:0 4px 18px #0003; font-size:10px; }
+.depth-heading { display:flex; align-items:center; justify-content:space-between; width:100%; padding:9px 11px; background:transparent; color:var(--cream); border:0; cursor:pointer; font:inherit; }
+.depth-heading strong { font-weight:500; }.depth-heading span { font-size:16px; }
+.depth-body { padding:0 11px 9px; }.depth-row { display:flex; flex-wrap:wrap; justify-content:space-between; gap:5px 10px; padding:8px 0; border-top:1px solid var(--line); }
+.depth-row strong,.depth-row small { display:block; font-weight:400; }.depth-row small { margin-top:4px; color:#aaa69b; font-size:9px; }.depth-buy strong { color:var(--green); }.depth-sell strong { color:var(--red); }
+.depth-values { text-align:right; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }.depth-incomplete { width:100%; color:var(--orange); font-size:9px; }
+.depth-body p { margin:6px 0; color:#aaa69b; font-size:9px; line-height:1.5; }.depth-body .depth-note { color:var(--cream); }.depth-body details { font-size:9px; color:#aaa69b; }.depth-body summary { cursor:pointer; }.depth-body a { color:var(--orange); }
 .levels-status button { background:#29251f; color:var(--orange); border:0; padding:5px 10px; cursor:pointer; }
 .auto-chart-shell .local-chart { left:54px; }
 .drawing-toolbar { position:absolute; top:82px; left:0; bottom:0; width:53px; display:flex; flex-direction:column; align-items:center; gap:7px; padding:12px 0; border-right:1px solid #303332; background:#101212; overflow-y:auto; z-index:3; }
