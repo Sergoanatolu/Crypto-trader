@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { CandlestickSeries, ColorType, createChart, HistogramSeries, LineSeries } from 'lightweight-charts'
+import { CandlestickSeries, ColorType, createChart, LineSeries } from 'lightweight-charts'
 import type { ISeriesApi, UTCTimestamp } from 'lightweight-charts'
 import { dayStart, findLevels, kyivDay } from './levels'
 import type { Bar } from './levels'
@@ -8,6 +8,7 @@ import type { DrawingChart } from './DrawingTools'
 import { formatPrice } from './prices'
 
 const frames = ['1m', '5m', '15m', '1H', '4H', '1D', '1W']
+const volumeFormatter = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 8 })
 
 async function fetchBars(symbol: string, frame: string, signal: AbortSignal, end?: number): Promise<Bar[]> {
   const response = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${frame.toLowerCase()}&limit=1000${end === undefined ? '' : `&endTime=${end}`}`, { signal })
@@ -30,6 +31,7 @@ export function AutoChart({ symbol, onPrice }: { symbol: string; onPrice: (symbo
   const [showLevels, setShowLevels] = useState(true)
   const [status, setStatus] = useState('Завантаження…')
   const [error, setError] = useState(false)
+  const [hoveredVolume, setHoveredVolume] = useState<number | null>(null)
   const lines = useRef<ISeriesApi<'Line'>[]>([])
   const visible = useRef(showLevels)
 
@@ -54,22 +56,30 @@ export function AutoChart({ symbol, onPrice }: { symbol: string; onPrice: (symbo
     let reconnect: ReturnType<typeof setTimeout> | undefined
     let lastTime = 0
     let readyStatus = ''
+    const volumesByTime = new Map<number, number>()
+    let hoveredTime: number | null = null
+    setHoveredVolume(null)
     const chart = createChart(container.current, {
       autoSize: true,
       localization: { priceFormatter: formatPrice },
       layout: { background: { type: ColorType.Solid, color: '#111313' }, textColor: '#aaa69b' },
       grid: { vertLines: { color: '#242725' }, horzLines: { color: '#242725' } },
-      rightPriceScale: { borderColor: '#282a29', scaleMargins: { top: 0.08, bottom: 0.2 } },
+      rightPriceScale: { borderColor: '#282a29', scaleMargins: { top: 0.08, bottom: 0.08 } },
       timeScale: { timeVisible: true, borderColor: '#282a29', rightOffset: 12 },
       crosshair: { mode: 0 },
     })
     const candles = chart.addSeries(CandlestickSeries, { upColor: '#66c49b', downColor: '#dc7e79', borderVisible: false, wickUpColor: '#66c49b', wickDownColor: '#dc7e79' })
+    const handleCrosshairMove: Parameters<typeof chart.subscribeCrosshairMove>[0] = (event) => {
+      const point = event.point
+      hoveredTime = point && point.x >= 0 && point.y >= 0
+        && point.x < chart.paneSize().width && point.y < chart.paneSize().height
+        && event.seriesData.has(candles) && typeof event.time === 'number' ? event.time : null
+      setHoveredVolume(hoveredTime === null ? null : volumesByTime.get(hoveredTime) ?? null)
+    }
+    chart.subscribeCrosshairMove(handleCrosshairMove)
     const duration = frame === '1W' ? 604800 : frame === '1D' ? 86400 : frame.endsWith('H') ? Number.parseInt(frame) * 3600 : Number.parseInt(frame) * 60
     setDrawingApi({ chart, candles, duration, identity: `${symbol}-${frame}-${day}-${retry}` })
-    const volumes = chart.addSeries(HistogramSeries, { priceFormat: { type: 'volume' }, priceScaleId: '' })
-    volumes.priceScale().applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } })
     lines.current = []
-    const volume = (bar: Bar) => ({ time: bar.time as UTCTimestamp, value: bar.volume, color: bar.close >= bar.open ? '#376b58' : '#794744' })
     const startSocket = () => {
       if (stopped) return
       socket = new WebSocket(`wss://fstream.binance.com/ws/${symbol.toLowerCase()}@kline_${frame.toLowerCase()}`)
@@ -80,9 +90,10 @@ export function AutoChart({ symbol, onPrice }: { symbol: string; onPrice: (symbo
           const { k } = JSON.parse(event.data)
           const bar: Bar = { time: Number(k.t) / 1000, open: Number(k.o), high: Number(k.h), low: Number(k.l), close: Number(k.c), volume: Number(k.v) }
           if (!Object.values(bar).every(Number.isFinite) || bar.time < lastTime) return
+          volumesByTime.set(bar.time, bar.volume)
+          if (hoveredTime === bar.time) setHoveredVolume(bar.volume)
           candles.update({ ...bar, time: bar.time as UTCTimestamp })
           onPrice(symbol, bar.close)
-          volumes.update(volume(bar))
           if (bar.time > lastTime) lines.current.forEach((line) => {
             const first = line.data()[0]
             if (first && 'value' in first) line.update({ time: bar.time as UTCTimestamp, value: first.value })
@@ -124,9 +135,9 @@ export function AutoChart({ symbol, onPrice }: { symbol: string; onPrice: (symbo
         const minMove = 10 ** Math.floor(Math.log10(Math.max(all[all.length - 1].close * 0.00001, 1e-8)))
         const priceFormat = { type: 'price' as const, precision: Math.max(0, -Math.round(Math.log10(minMove))), minMove }
         candles.applyOptions({ priceFormat })
+        all.forEach((bar) => volumesByTime.set(bar.time, bar.volume))
         candles.setData(all.map((bar) => ({ ...bar, time: bar.time as UTCTimestamp })))
         onPrice(symbol, all[all.length - 1].close)
-        volumes.setData(all.map(volume))
         lastTime = all[all.length - 1].time
         const levels = findLevels(history)
         lines.current = levels.map((level) => {
@@ -144,12 +155,12 @@ export function AutoChart({ symbol, onPrice }: { symbol: string; onPrice: (symbo
       }
     }
     void load()
-    return () => { stopped = true; controller.abort(); clearTimeout(reconnect); socket?.close(); lines.current = []; chart.remove() }
+    return () => { stopped = true; controller.abort(); clearTimeout(reconnect); socket?.close(); lines.current = []; chart.unsubscribeCrosshairMove(handleCrosshairMove); chart.remove() }
   }, [symbol, frame, day, retry, onPrice])
 
   return <div className="local-chart-shell auto-chart-shell">
     <div className="local-chart-tools"><strong>{symbol}</strong><div className="chart-timeframes">{frames.map((value) => <button key={value} className={frame === value ? 'tool-active' : ''} onClick={() => setFrame(value)}>{value}</button>)}</div><button aria-pressed={showLevels} className={showLevels ? 'tool-active' : ''} onClick={() => setShowLevels((value) => !value)}>Авто рівні</button></div>
-    <div className="levels-status" role="status"><span className="level-high">● Максимуми</span><span className="level-low">● Мінімуми</span><span>{status}</span>{error && <button onClick={() => setRetry((value) => value + 1)}>Повторити</button>}</div>
+    <div className="levels-status" role="status"><span className="candle-volume">Обсяг: {hoveredVolume === null ? '—' : `${volumeFormatter.format(hoveredVolume)} ${symbol.replace(/USDT$/, '')}`}</span><span className="level-high">● Максимуми</span><span className="level-low">● Мінімуми</span><span>{status}</span>{error && <button onClick={() => setRetry((value) => value + 1)}>Повторити</button>}</div>
     <div className="local-chart" ref={container} />
     {drawingApi?.identity === `${symbol}-${frame}-${day}-${retry}` && <DrawingTools key={drawingApi.identity} api={drawingApi} storageKey={`vanta-drawings-v2-${symbol}`} />}
   </div>
