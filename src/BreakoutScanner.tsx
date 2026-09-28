@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { findLevels, dayStart } from './levels'
 import { analyzeLevel } from './levelAnalysis'
 import { distancePercent } from './breakout'
 import { formatPrice } from './prices'
-import { fetchBars, MarketRateLimitError } from './marketBars'
+import { fetchBars, fetchHuntLevels, MarketRateLimitError } from './marketBars'
 
 export type ScanMarket = { symbol: string; quoteVolume?: number; change: number }
-type Row = { symbol: string; price: number; level: number; kind: string; strength: number | null; distance: number; volume: number; change: number; at: number }
+type Row = { symbol: string; price: number; level: number; kind: string; strength: number | null; distance: number; volume: number; change: number; at: number; sourceFrame?: string; pressure: string | null; relativeVolume: number | null; state: string }
 
 export function BreakoutScanner({ markets, onSelect }: { markets: ScanMarket[]; onSelect: (symbol: string) => void }) {
   const latest = useRef(markets)
@@ -51,23 +50,16 @@ export function BreakoutScanner({ markets, onSelect }: { markets: ScanMarket[]; 
         if (stopped) return
         setStatus(`Перевірка ${++completed}/${candidates.length} · ${market.symbol}`)
         try {
-          let end = dayStart() - 1
-          let history: Awaited<ReturnType<typeof fetchBars>> = []
-          for (let page = 0; page < 3; page++) {
-            const batch = await pacedFetch(market.symbol, '1H', controller.signal, end)
-            history = [...batch, ...history]
-            if (batch.length < 1000) break
-            end = batch[0].time * 1000 - 1
-          }
-          const recent = await pacedFetch(market.symbol, '1H', controller.signal)
-          const closed = [...new Map([...history, ...recent].map((bar) => [bar.time, bar])).values()].sort((a, b) => a.time - b.time).filter((bar) => (bar.time + 3600) * 1000 <= Date.now())
+          const groups = await fetchHuntLevels(market.symbol, controller.signal, pacedFetch)
+          const recent = await pacedFetch(market.symbol, '5m', controller.signal)
+          const closed = recent.filter((bar) => (bar.time + 300) * 1000 <= Date.now()).slice(-999)
           const price = recent.at(-1)?.close
           if (!price) throw new Error('No price')
-          const levels = findLevels(history.filter((bar) => (bar.time + 3600) * 1000 <= dayStart()))
+          const levels = groups.flatMap((group) => group.levels)
           const nearest = levels.sort((a, b) => Math.abs(a.price - price) - Math.abs(b.price - price))[0]
           if (!stopped && nearest) {
-            const analysis = analyzeLevel(nearest, closed)
-            setRows((current) => [...current, { symbol: market.symbol, price, level: nearest.price, kind: nearest.kind, strength: analysis.strength, distance: distancePercent(price, nearest.price), volume: market.quoteVolume!, change: market.change, at: Date.now() }])
+            const analysis = analyzeLevel(nearest, closed, groups)
+            setRows((current) => [...current, { symbol: market.symbol, price, level: nearest.price, kind: nearest.kind, strength: analysis.strength, distance: distancePercent(price, nearest.price), volume: market.quoteVolume!, change: market.change, at: Date.now(), sourceFrame: nearest.sourceFrame, pressure: analysis.pressure, relativeVolume: analysis.relativeVolume, state: analysis.state }])
           }
         } catch (error) {
           if (stopped) return
@@ -90,8 +82,9 @@ export function BreakoutScanner({ markets, onSelect }: { markets: ScanMarket[]; 
   }, [volume, limit, run, hasMarkets])
   const visibleRows = rows.filter((row) => row.distance <= distance).sort((a, b) => a.distance - b.distance)
   return <div className="breakout-scanner">
-    <strong>Полювання на пробій · 1H</strong>
-    <p>{limit === 0 ? 'Усі доступні монети' : `До ${limit} найбільших монет за обсягом`}, які проходять фільтр. Великий список перевіряється кілька хвилин; результати з’являються поступово. Новий цикл через 5 хв після завершення. Сила без збігів старших ТФ.</p>
+    <strong>Полювання · 5M</strong>
+    <p>Рівні 1H / 4H · сигнали 5M. Реакції, обсяг і пробій оцінюються за останніми 999 закритими свічками 5M.</p>
+    <p>{limit === 0 ? 'Усі доступні монети' : `До ${limit} найбільших монет за обсягом`}, які проходять фільтр. Великий список перевіряється кілька хвилин; результати з’являються поступово. Новий цикл через 5 хв після завершення.</p>
     <label>Кількість монет<select value={limit} onChange={(e) => setLimit(Number(e.target.value))}>{[12, 25, 50, 100, 200, 500, 0].map((v) => <option key={v} value={v}>{v === 0 ? 'Усі' : v}</option>)}</select></label>
     <label>Відстань до рівня<select value={distance} onChange={(e) => setDistance(Number(e.target.value))}>{[0.25, 0.5, 1, 2, 5].map((v) => <option key={v} value={v}>{v}%</option>)}</select></label>
     <label>Обсяг 24 год, USDT<select value={volume} onChange={(e) => setVolume(Number(e.target.value))}>{[0, 5, 10, 25, 50, 100, 200, 300].map((v) => <option key={v} value={v}>{v === 0 ? 'Без мінімуму' : `≥ ${v} млн`}</option>)}</select></label>
@@ -100,7 +93,8 @@ export function BreakoutScanner({ markets, onSelect }: { markets: ScanMarket[]; 
     {!running && !visibleRows.length && <p>Поблизу рівнів за цими умовами нічого не знайдено.</p>}
     {visibleRows.map((row) => <button className="scan-row" key={row.symbol} onClick={() => onSelect(row.symbol)}>
       <strong>{row.symbol} <span>{row.distance.toFixed(2)}%</span></strong>
-      <small>{row.kind === 'high' ? 'Опір' : 'Підтримка'} {formatPrice(row.level)} · {row.strength ?? '—'}/100</small>
+      <small>{row.kind === 'high' ? 'Опір' : 'Підтримка'} {formatPrice(row.level)} · {row.sourceFrame} · {row.strength ?? '—'}/100</small>
+      <small>5M: {row.state} · Тиск {row.pressure ?? '—'} · Обсяг {row.relativeVolume === null ? '—' : `×${row.relativeVolume.toFixed(2)}`}</small>
       <small>Ціна {formatPrice(row.price)} · {row.change.toFixed(2)}%</small>
       <small>{(row.volume / 1e6).toFixed(0)} млн USDT · {new Date(row.at).toLocaleTimeString('uk-UA')}</small>
     </button>)}

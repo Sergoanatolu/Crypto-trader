@@ -1,4 +1,15 @@
 import type { Bar } from './levels'
+import { dayStart, findLevels } from './levels'
+
+export async function fetchHuntLevels(symbol: string, signal: AbortSignal, loader = fetchBars) {
+  const cutoff = dayStart()
+  const groups = []
+  for (const [frame, seconds] of [['1H', 3600], ['4H', 14400]] as const) {
+    const bars = await loader(symbol, frame, signal, cutoff - 1)
+    groups.push({ frame, levels: findLevels(bars.filter((bar) => (bar.time + seconds) * 1000 <= cutoff)).map((level) => ({ ...level, sourceFrame: frame })) })
+  }
+  return groups
+}
 
 export class MarketRateLimitError extends Error {
   retryMs: number

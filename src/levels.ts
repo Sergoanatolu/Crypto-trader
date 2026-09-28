@@ -1,5 +1,5 @@
 export type Bar = { time: number; open: number; high: number; low: number; close: number; volume: number }
-export type Level = { time: number; price: number; kind: 'high' | 'low'; score: number }
+export type Level = { time: number; price: number; kind: 'high' | 'low'; score: number; sourceFrame?: string }
 
 // Confirm pivots with twelve closed bars on both sides; merge nearby prices.
 export function findLevels(bars: Bar[]): Level[] {

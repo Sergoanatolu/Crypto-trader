@@ -10,8 +10,9 @@ export function LevelInsights({ items, frame, pending, unavailableFrames, update
       {pending && <p role="status">Завантаження рівнів…</p>}
       {error && <p role="status">Аналіз недоступний: не вдалося завантажити свічки.</p>}
       {!pending && !error && !items.length && <p>Немає підтверджених рівнів для оцінки.</p>}
-      {items.map((item) => <article className="level-card" key={`${item.level.kind}-${item.level.time}`}>
-        <div className="level-card-title"><strong className={item.level.kind === 'high' ? 'level-high' : 'level-low'}>{item.level.kind === 'high' ? 'Опір' : 'Підтримка'} · {formatPrice(item.level.price)}</strong><b>{item.strength === null ? '—' : `${item.strength}/100`}</b></div>
+      {items.map((item) => <article className="level-card" key={`${item.level.sourceFrame}-${item.level.kind}-${item.level.time}`}>
+        <div className="level-card-title"><strong className={item.level.kind === 'high' ? 'level-high' : 'level-low'}>{item.level.kind === 'high' ? 'Опір' : 'Підтримка'} · {formatPrice(item.level.price)} {item.level.sourceFrame && `· ${item.level.sourceFrame}`}</strong><b>{item.strength === null ? '—' : `${item.strength}/100`}</b></div>
+        {item.level.sourceFrame && <p>Рівень {item.level.sourceFrame} · аналіз останніх 999 закритих свічок 5M. Збіг перевіряємо з іншим ТФ із 1H / 4H.</p>}
         <meter min={0} max={100} value={item.strength ?? 0} aria-label="Сила рівня" />
         <p>{item.tests} тестів · {item.rebounds} відбоїв · середній відскок {item.averageBounce === null ? '—' : `${item.averageBounce.toFixed(1)} ATR`}</p>
         <p>Збіг: {item.matchingFrames.join(' / ') || 'не виявлено'} · Обсяг {item.relativeVolume === null ? '—' : `×${item.relativeVolume.toFixed(2)}`}</p>

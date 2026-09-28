@@ -48,6 +48,16 @@ test('confluence requires the same kind and a nearby price', () => {
   assert.deepEqual(result.matchingFrames, ['1H'])
 })
 
+test('a higher timeframe level does not count its own source as confluence', () => {
+  const sourced = { ...level, sourceFrame: '1H' }
+  const result = analyzeLevel(sourced, history(), [
+    { frame: '1H', levels: [sourced] },
+    { frame: '4H', levels: [{ ...level, sourceFrame: '4H', price: 100.1 }] },
+  ])
+  assert.deepEqual(result.matchingFrames, ['4H'])
+  assert.equal(result.level.sourceFrame, '1H')
+})
+
 test('far away volume spikes do not create high breakout pressure', () => {
   const result = analyzeLevel(level, [...history(), bar(21, 90, 90.5, 89.5, 1000)])
   assert.equal(result.pressure, 'Низький')

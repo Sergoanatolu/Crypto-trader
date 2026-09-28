@@ -88,7 +88,7 @@ function App() {
         <aside className="sidebar">
           <div className="side-title"><h1>Futures</h1></div>
           <div className="scanner-tabs"><button aria-pressed={!scanner} onClick={() => setScanner(false)}>Усі монети</button><button aria-pressed={scanner} onClick={() => setScanner(true)}>Пробої</button></div>
-          {scanner ? <BreakoutScanner markets={marketData} onSelect={(symbol) => { setSelected(symbol); setChartRequest({ id: Date.now(), frame: '1H' }) }} /> : <>
+          {scanner ? <BreakoutScanner markets={marketData} onSelect={(symbol) => { setSelected(symbol); setChartRequest({ id: Date.now(), frame: '5m' }) }} /> : <>
           <div className="search-box"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search symbol..." /><kbd>/</kbd></div>
           <div className="filters"><span>ALL {marketData.length}</span><button><Filter size={13} /> Filters</button></div>
           <div className="market-list">

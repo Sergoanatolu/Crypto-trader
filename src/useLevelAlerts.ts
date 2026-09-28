@@ -3,7 +3,7 @@ import type { LevelAnalysis } from './levelAnalysis'
 import { alertTransitions, distancePercent } from './breakout'
 import { formatPrice } from './prices'
 
-export const watchKey = (symbol: string, frame: string, item: LevelAnalysis) => `${symbol}-${frame}-${item.level.kind}-${item.level.time}`
+export const watchKey = (symbol: string, frame: string, item: LevelAnalysis) => `${symbol}-${frame}-${item.level.sourceFrame ?? frame}-${item.level.kind}-${item.level.time}`
 export function useLevelAlerts() {
   const [watched, setWatched] = useState<string[]>([])
   const [events, setEvents] = useState<{ id: number; text: string }[]>([])

@@ -1,4 +1,4 @@
-import { fetchBars } from './marketBars'
+import { fetchBars, fetchHuntLevels } from './marketBars'
 import { useLevelAlerts, watchKey } from './useLevelAlerts'
 import { useEffect, useRef, useState } from 'react'
 import { CandlestickSeries, ColorType, createChart, LineSeries } from 'lightweight-charts'
@@ -11,7 +11,6 @@ import { LevelInsights } from './LevelInsights'
 import { DrawingTools } from './DrawingTools'
 import type { DrawingChart } from './DrawingTools'
 import { formatPrice } from './prices'
-import { OrderBookDepth } from './OrderBookDepth'
 
 const frames = ['1m', '5m', '15m', '1H', '4H', '1D', '1W']
 const volumeFormatter = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 8 })
@@ -36,7 +35,7 @@ export function AutoChart({ symbol, onPrice, chartRequest }: { symbol: string; o
   const [error, setError] = useState(false)
   const [hoveredVolume, setHoveredVolume] = useState<number | null>(null)
   const [insights, setInsights] = useState<{ identity: string; items: LevelAnalysis[]; unavailableFrames: string[]; updatedAt: number | null } | null>(null)
-  const [selectedLevel, setSelectedLevel] = useState<{ identity: string; time: number; kind: Level['kind'] } | null>(null)
+  const [selectedLevel, setSelectedLevel] = useState<{ identity: string; time: number; kind: Level['kind']; sourceFrame?: string } | null>(null)
   const lines = useRef<ISeriesApi<'Line'>[]>([])
   const visible = useRef(showLevels)
 
@@ -74,10 +73,11 @@ export function AutoChart({ symbol, onPrice, chartRequest }: { symbol: string; o
     let unavailableFrames: string[] = []
     let liveItems: LevelAnalysis[] = []
     let livePrice = 0
+    let firstChartTime = 0
     const identity = `${symbol}-${frame}-${day}-${retry}`
     const refreshInsights = () => {
       if (stopped) return
-      liveItems = analysisLevels.map((level) => analyzeLevel(level, analysisBars, otherFrames)).sort((a, b) => Math.abs(a.level.price - (analysisBars.at(-1)?.close ?? 0)) - Math.abs(b.level.price - (analysisBars.at(-1)?.close ?? 0)))
+      liveItems = analysisLevels.map((level) => analyzeLevel(level, frame === '5m' ? analysisBars.slice(-999) : analysisBars, otherFrames)).sort((a, b) => Math.abs(a.level.price - (analysisBars.at(-1)?.close ?? 0)) - Math.abs(b.level.price - (analysisBars.at(-1)?.close ?? 0)))
       setInsights({ identity, items: liveItems, unavailableFrames, updatedAt: analysisBars.length ? analysisBars[analysisBars.length - 1].time + duration : null })
       if (livePrice > 0) alertMonitor.current(symbol, frame, liveItems, livePrice)
     }
@@ -111,12 +111,12 @@ export function AutoChart({ symbol, onPrice, chartRequest }: { symbol: string; o
       const endX = chart.timeScale().timeToCoordinate(lastTime as UTCTimestamp)
       for (const level of analysisLevels) {
         const y = candles.priceToCoordinate(level.price)
-        const startX = chart.timeScale().timeToCoordinate(level.time as UTCTimestamp)
+        const startX = chart.timeScale().timeToCoordinate(Math.max(level.time, firstChartTime) as UTCTimestamp)
         if (y === null || startX === null || endX === null || point.x < startX || point.x > endX) continue
         const distance = Math.abs(point.y - y)
         if (distance <= nearestDistance) { nearest = level; nearestDistance = distance }
       }
-      setSelectedLevel(nearest ? { identity, time: nearest.time, kind: nearest.kind } : null)
+      setSelectedLevel(nearest ? { identity, time: nearest.time, kind: nearest.kind, sourceFrame: nearest.sourceFrame } : null)
     }
     chart.subscribeClick(handleLevelClick)
     const duration = frame === '1W' ? 604800 : frame === '1D' ? 86400 : frame.endsWith('H') ? Number.parseInt(frame) * 3600 : Number.parseInt(frame) * 60
@@ -189,13 +189,17 @@ export function AutoChart({ symbol, onPrice, chartRequest }: { symbol: string; o
         onPrice(symbol, all[all.length - 1].close)
         livePrice = all[all.length - 1].close
         lastTime = all[all.length - 1].time
-        const levels = findLevels(history)
+        const huntGroups = frame === '5m' ? await fetchHuntLevels(symbol, controller.signal) : null
+        if (stopped) return
+        const levels = huntGroups ? huntGroups.flatMap((group) => group.levels) : findLevels(history)
+        firstChartTime = all[0].time
+        if (huntGroups) otherFrames = huntGroups
         analysisLevels = levels
         analysisBars = all.filter((bar) => (bar.time + duration) * 1000 <= Date.now())
         const frameDurations = [{ frame: '1H', seconds: 3600 }, { frame: '4H', seconds: 14400 }, { frame: '1D', seconds: 86400 }].filter((entry) => entry.seconds > duration)
-        unavailableFrames = frameDurations.map((entry) => entry.frame)
+        unavailableFrames = huntGroups ? [] : frameDurations.map((entry) => entry.frame)
         refreshInsights()
-        void Promise.allSettled(frameDurations.map(async (entry) => {
+        if (!huntGroups) void Promise.allSettled(frameDurations.map(async (entry) => {
           const bars = await fetchBars(symbol, entry.frame, controller.signal)
           return { frame: entry.frame, levels: findLevels(bars.filter((bar) => (bar.time + entry.seconds) * 1000 <= Date.now())) }
         })).then((results) => {
@@ -205,13 +209,13 @@ export function AutoChart({ symbol, onPrice, chartRequest }: { symbol: string; o
           refreshInsights()
         })
         lines.current = levels.map((level) => {
-          const line = chart.addSeries(LineSeries, { color: level.kind === 'high' ? '#3868ff' : '#24b7a5', lineWidth: 2, pointMarkersVisible: false, crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: true, visible: visible.current, priceFormat, autoscaleInfoProvider: () => null })
-          line.setData([{ time: level.time as UTCTimestamp, value: level.price }, { time: lastTime as UTCTimestamp, value: level.price }])
+          const line = chart.addSeries(LineSeries, { title: level.sourceFrame ?? '', color: level.kind === 'high' ? '#3868ff' : '#24b7a5', lineWidth: 2, pointMarkersVisible: false, crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: true, visible: visible.current, priceFormat, autoscaleInfoProvider: () => null })
+          line.setData([{ time: Math.max(level.time, firstChartTime) as UTCTimestamp, value: level.price }, { time: lastTime as UTCTimestamp, value: level.price }])
           return line
         })
         const count = Math.min(all.length, frame === '5m' ? 2200 : 500)
         chart.timeScale().setVisibleLogicalRange({ from: all.length - count, to: all.length + 12 })
-        readyStatus = levels.length ? `Рівнів: ${levels.length} · ${day} · Київ` : 'Недостатньо підтверджених екстремумів'
+        readyStatus = levels.length ? `Рівнів: ${levels.length}${huntGroups ? ' · 1H / 4H → 5M' : ''} · ${day} · Київ` : 'Недостатньо підтверджених екстремумів'
         setStatus(readyStatus)
         startSocket()
       } catch {
@@ -224,18 +228,17 @@ export function AutoChart({ symbol, onPrice, chartRequest }: { symbol: string; o
 
   const identity = `${symbol}-${frame}-${day}-${retry}`
   const selectedInsight = selectedLevel?.identity === identity && insights?.identity === identity
-    ? insights.items.find((item) => item.level.time === selectedLevel.time && item.level.kind === selectedLevel.kind) : undefined
+    ? insights.items.find((item) => item.level.time === selectedLevel.time && item.level.kind === selectedLevel.kind && item.level.sourceFrame === selectedLevel.sourceFrame) : undefined
 
   return <div className="local-chart-shell auto-chart-shell">
     <div className="local-chart-tools"><strong>{symbol}</strong><div className="chart-timeframes">{frames.map((value) => <button key={value} className={frame === value ? 'tool-active' : ''} onClick={() => setFrame(value)}>{value}</button>)}</div><button aria-pressed={showLevels} className={showLevels ? 'tool-active' : ''} onClick={() => { setSelectedLevel(null); setShowLevels((value) => !value) }}>Авто рівні</button></div>
     <div className="levels-status" role="status"><span className="candle-volume">Обсяг: {hoveredVolume === null ? '—' : `${volumeFormatter.format(hoveredVolume)} ${symbol.replace(/USDT$/, '')}`}</span><span className="level-high">● Максимуми</span><span className="level-low">● Мінімуми</span><span>{status}</span>{error && <button onClick={() => setRetry((value) => value + 1)}>Повторити</button>}</div>
     <div className="local-chart" ref={container} />
-    {showLevels && selectedInsight && insights && <LevelInsights key={`${identity}-${selectedInsight.level.kind}-${selectedInsight.level.time}`} error={error} items={[selectedInsight]} frame={frame} pending={false} unavailableFrames={insights.unavailableFrames} updatedAt={insights.updatedAt} onClose={() => setSelectedLevel(null)} volumeThreshold={alerts.volume} nearThreshold={alerts.near} onVolumeChange={alerts.setVolume} onNearChange={alerts.setNear} watched={alerts.watched.includes(watchKey(symbol, frame, selectedInsight))} onWatch={() => alerts.toggle(watchKey(symbol, frame, selectedInsight))} />}
+    {showLevels && selectedInsight && insights && <LevelInsights key={`${identity}-${selectedInsight.level.sourceFrame}-${selectedInsight.level.kind}-${selectedInsight.level.time}`} error={error} items={[selectedInsight]} frame={frame} pending={false} unavailableFrames={insights.unavailableFrames} updatedAt={insights.updatedAt} onClose={() => setSelectedLevel(null)} volumeThreshold={alerts.volume} nearThreshold={alerts.near} onVolumeChange={alerts.setVolume} onNearChange={alerts.setNear} watched={alerts.watched.includes(watchKey(symbol, frame, selectedInsight))} onWatch={() => alerts.toggle(watchKey(symbol, frame, selectedInsight))} />}
     <div className="alert-tray"><button onClick={() => setShowAlerts(!showAlerts)} aria-expanded={showAlerts}>Алерти · {alerts.events.length}</button>
       {showAlerts && <div className="alert-feed"><p>Стеження лише за відкритою монетою та таймфреймом, поки сайт відкритий. Нові події після ввімкнення стеження.</p><button onClick={alerts.clear}>Очистити події</button>{!alerts.events.length && <p>Подій поки немає. Клікніть рівень → «Стежити».</p>}{alerts.events.map((event) => <p key={event.id}>{event.text}</p>)}</div>}
       <span className="alert-live" role="status">{alerts.events[0]?.text}</span>
     </div>
-    <OrderBookDepth key={symbol} symbol={symbol} />
     {drawingApi?.identity === `${symbol}-${frame}-${day}-${retry}` && <DrawingTools key={drawingApi.identity} api={drawingApi} storageKey={`vanta-drawings-v2-${symbol}`} />}
   </div>
 }
