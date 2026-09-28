@@ -1,5 +1,6 @@
 import { fetchBars, fetchHuntLevels } from './marketBars'
 import { useLevelAlerts, watchKey } from './useLevelAlerts'
+import { selectQualityLevels } from './qualityLevels'
 import { useEffect, useRef, useState } from 'react'
 import { CandlestickSeries, ColorType, createChart, LineSeries } from 'lightweight-charts'
 import type { ISeriesApi, UTCTimestamp } from 'lightweight-charts'
@@ -14,6 +15,7 @@ import { formatPrice } from './prices'
 
 const frames = ['1m', '5m', '15m', '1H', '4H', '1D', '1W']
 const volumeFormatter = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 8 })
+const levelKey = (level: Level) => `${level.sourceFrame}-${level.kind}-${level.time}-${level.price}`
 
 export function AutoChart({ symbol, onPrice, chartRequest }: { symbol: string; onPrice: (symbol: string, price: number) => void; chartRequest?: { id: number; frame: string } }) {
   const container = useRef<HTMLDivElement>(null)
@@ -31,12 +33,14 @@ export function AutoChart({ symbol, onPrice, chartRequest }: { symbol: string; o
   const [day, setDay] = useState(kyivDay)
   const [retry, setRetry] = useState(0)
   const [showLevels, setShowLevels] = useState(true)
+  const [qualityOnly, setQualityOnly] = useState(true)
   const [status, setStatus] = useState('Завантаження…')
   const [error, setError] = useState(false)
   const [hoveredVolume, setHoveredVolume] = useState<number | null>(null)
   const [insights, setInsights] = useState<{ identity: string; items: LevelAnalysis[]; unavailableFrames: string[]; updatedAt: number | null } | null>(null)
   const [selectedLevel, setSelectedLevel] = useState<{ identity: string; time: number; kind: Level['kind']; sourceFrame?: string } | null>(null)
   const lines = useRef<ISeriesApi<'Line'>[]>([])
+  const lineLevels = useRef<Level[]>([])
   const visible = useRef(showLevels)
 
   useEffect(() => {
@@ -49,8 +53,9 @@ export function AutoChart({ symbol, onPrice, chartRequest }: { symbol: string; o
 
   useEffect(() => {
     visible.current = showLevels
-    lines.current.forEach((line) => line.applyOptions({ visible: showLevels }))
-  }, [showLevels])
+    const selected = new Set(selectQualityLevels(insights?.items ?? []).map((item) => levelKey(item.level)))
+    lines.current.forEach((line, index) => line.applyOptions({ visible: showLevels && (!qualityOnly || selected.has(levelKey(lineLevels.current[index]))) }))
+  }, [showLevels, qualityOnly, insights])
 
   useEffect(() => {
     if (!selectedLevel) return
@@ -109,7 +114,8 @@ export function AutoChart({ symbol, onPrice, chartRequest }: { symbol: string; o
       let nearest: Level | null = null
       let nearestDistance = 8 // A small pixel tolerance also makes thin lines tappable.
       const endX = chart.timeScale().timeToCoordinate(lastTime as UTCTimestamp)
-      for (const level of analysisLevels) {
+      for (const [index, level] of analysisLevels.entries()) {
+        if (!lines.current[index]?.options().visible) continue
         const y = candles.priceToCoordinate(level.price)
         const startX = chart.timeScale().timeToCoordinate(Math.max(level.time, firstChartTime) as UTCTimestamp)
         if (y === null || startX === null || endX === null || point.x < startX || point.x > endX) continue
@@ -208,6 +214,7 @@ export function AutoChart({ symbol, onPrice, chartRequest }: { symbol: string; o
           unavailableFrames = results.flatMap((result, i) => result.status === 'rejected' ? [frameDurations[i].frame] : [])
           refreshInsights()
         })
+        lineLevels.current = levels
         lines.current = levels.map((level) => {
           const line = chart.addSeries(LineSeries, { title: level.sourceFrame ?? '', color: level.kind === 'high' ? '#3868ff' : '#24b7a5', lineWidth: level.sourceFrame === '5M' ? 1 : 2, lineStyle: level.sourceFrame === '5M' ? 2 : 0, pointMarkersVisible: false, crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: true, visible: visible.current, priceFormat, autoscaleInfoProvider: () => null })
           line.setData([{ time: Math.max(level.time, firstChartTime) as UTCTimestamp, value: level.price }, { time: lastTime as UTCTimestamp, value: level.price }])
@@ -227,12 +234,13 @@ export function AutoChart({ symbol, onPrice, chartRequest }: { symbol: string; o
   }, [symbol, frame, day, retry, onPrice])
 
   const identity = `${symbol}-${frame}-${day}-${retry}`
+  const qualityItems = insights?.identity === identity ? selectQualityLevels(insights.items) : []
   const selectedInsight = selectedLevel?.identity === identity && insights?.identity === identity
-    ? insights.items.find((item) => item.level.time === selectedLevel.time && item.level.kind === selectedLevel.kind && item.level.sourceFrame === selectedLevel.sourceFrame) : undefined
+    ? (qualityOnly ? qualityItems : insights.items).find((item) => item.level.time === selectedLevel.time && item.level.kind === selectedLevel.kind && item.level.sourceFrame === selectedLevel.sourceFrame) : undefined
 
   return <div className="local-chart-shell auto-chart-shell">
     <div className="local-chart-tools"><strong>{symbol}</strong><div className="chart-timeframes">{frames.map((value) => <button key={value} className={frame === value ? 'tool-active' : ''} onClick={() => setFrame(value)}>{value}</button>)}</div><button aria-pressed={showLevels} className={showLevels ? 'tool-active' : ''} onClick={() => { setSelectedLevel(null); setShowLevels((value) => !value) }}>Авто рівні</button></div>
-    <div className="levels-status" role="status"><span className="candle-volume">Обсяг: {hoveredVolume === null ? '—' : `${volumeFormatter.format(hoveredVolume)} ${symbol.replace(/USDT$/, '')}`}</span><span className="level-high">● Максимуми</span><span className="level-low">● Мінімуми</span><span>{status}</span>{error && <button onClick={() => setRetry((value) => value + 1)}>Повторити</button>}</div>
+    <div className="levels-status" role="status"><span className="candle-volume">Обсяг: {hoveredVolume === null ? '—' : `${volumeFormatter.format(hoveredVolume)} ${symbol.replace(/USDT$/, '')}`}</span><button aria-pressed={qualityOnly} title="До 2 опорів і 2 підтримок: 2+ екстремуми, сила від 40, без закриття за рівнем; близькі дублікати приховано" onClick={() => { setSelectedLevel(null); setQualityOnly((value) => !value) }}>{qualityOnly ? `Якісні рівні (${showLevels ? qualityItems.length : 0}) · показати всі` : 'Усі рівні · лише якісні'}</button><span className="level-high">● Максимуми</span><span className="level-low">● Мінімуми</span><span>{status}</span>{error && <button onClick={() => setRetry((value) => value + 1)}>Повторити</button>}</div>
     <div className="local-chart" ref={container} />
     {showLevels && selectedInsight && insights && <LevelInsights key={`${identity}-${selectedInsight.level.sourceFrame}-${selectedInsight.level.kind}-${selectedInsight.level.time}`} error={error} items={[selectedInsight]} frame={frame} pending={false} unavailableFrames={insights.unavailableFrames} updatedAt={insights.updatedAt} onClose={() => setSelectedLevel(null)} volumeThreshold={alerts.volume} nearThreshold={alerts.near} onVolumeChange={alerts.setVolume} onNearChange={alerts.setNear} watched={alerts.watched.includes(watchKey(symbol, frame, selectedInsight))} onWatch={() => alerts.toggle(watchKey(symbol, frame, selectedInsight))} />}
     <div className="alert-tray"><button onClick={() => setShowAlerts(!showAlerts)} aria-expanded={showAlerts}>Алерти · {alerts.events.length}</button>
