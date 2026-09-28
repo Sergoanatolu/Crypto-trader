@@ -13,6 +13,7 @@ export function BreakoutScanner({ markets, onSelect }: { markets: ScanMarket[]; 
   useEffect(() => { latest.current = markets }, [markets])
   const [distance, setDistance] = useState(1)
   const [volume, setVolume] = useState(100)
+  const [limit, setLimit] = useState(50)
   const [rows, setRows] = useState<Row[]>([])
   const [status, setStatus] = useState('')
   const [running, setRunning] = useState(false)
@@ -25,7 +26,7 @@ export function BreakoutScanner({ markets, onSelect }: { markets: ScanMarket[]; 
     const scan = async () => {
       setRunning(true)
       setRows([])
-      const candidates = latest.current.filter((market) => Number.isFinite(market.quoteVolume) && market.quoteVolume! >= volume * 1e6).sort((a, b) => b.quoteVolume! - a.quoteVolume!).slice(0, 12)
+      const candidates = latest.current.filter((market) => Number.isFinite(market.quoteVolume) && market.quoteVolume! >= volume * 1e6).sort((a, b) => b.quoteVolume! - a.quoteVolume!).slice(0, limit)
       let failed = 0
       let completed = 0
       for (const market of candidates) {
@@ -59,11 +60,12 @@ export function BreakoutScanner({ markets, onSelect }: { markets: ScanMarket[]; 
     }
     void scan()
     return () => { stopped = true; controller.abort(); clearTimeout(timer) }
-  }, [volume, run, hasMarkets])
+  }, [volume, limit, run, hasMarkets])
   const visibleRows = rows.filter((row) => row.distance <= distance).sort((a, b) => a.distance - b.distance)
   return <div className="breakout-scanner">
     <strong>Полювання на пробій · 1H</strong>
-    <p>12 найбільших монет за обсягом. Оновлення кожні 5 хв. Сила без збігів старших ТФ.</p>
+    <p>До {limit} найбільших монет за обсягом, які проходять фільтр. Новий цикл через 5 хв після завершення. Сила без збігів старших ТФ.</p>
+    <label>Кількість монет<select value={limit} onChange={(e) => setLimit(Number(e.target.value))}>{[12, 25, 50, 100].map((v) => <option key={v} value={v}>{v}</option>)}</select></label>
     <label>Відстань до рівня<select value={distance} onChange={(e) => setDistance(Number(e.target.value))}>{[0.25, 0.5, 1, 2, 5].map((v) => <option key={v} value={v}>{v}%</option>)}</select></label>
     <label>Обсяг 24 год, USDT<select value={volume} onChange={(e) => setVolume(Number(e.target.value))}>{[0, 50, 100, 200, 300].map((v) => <option key={v} value={v}>≥ {v} млн</option>)}</select></label>
     <button disabled={running} onClick={() => setRun((v) => v + 1)}>Оновити</button>
