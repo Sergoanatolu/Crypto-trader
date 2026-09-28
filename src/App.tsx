@@ -4,11 +4,13 @@ import { AutoChart } from './AutoChart'
 import { BreakoutScanner } from './BreakoutScanner'
 import { formatPrice } from './prices'
 import './App.css'
+import { useSavedState } from './useSavedState'
+import { decodeFavorites, defaultFavorites } from './savedChartState'
 
-type Market = { symbol: string; name: string; price: string; change: number; quoteVolume?: number; favorite?: boolean; pulse?: number; direction?: 'up' | 'down' }
+type Market = { symbol: string; name: string; price: string; change: number; quoteVolume?: number; pulse?: number; direction?: 'up' | 'down' }
 const fallbackMarkets: Market[] = [
-  { symbol: 'BTCUSDT', name: 'Bitcoin', price: '67,842.10', change: 2.48, favorite: true },
-  { symbol: 'ETHUSDT', name: 'Ethereum', price: '3,521.84', change: 1.92, favorite: true },
+  { symbol: 'BTCUSDT', name: 'Bitcoin', price: '67,842.10', change: 2.48 },
+  { symbol: 'ETHUSDT', name: 'Ethereum', price: '3,521.84', change: 1.92 },
   { symbol: 'SOLUSDT', name: 'Solana', price: '182.64', change: 5.41 },
   { symbol: 'BNBUSDT', name: 'BNB', price: '594.20', change: -0.84 },
   { symbol: 'XRPUSDT', name: 'XRP', price: '0.5248', change: -1.26 },
@@ -17,6 +19,7 @@ const fallbackMarkets: Market[] = [
   { symbol: 'LINKUSDT', name: 'Chainlink', price: '18.42', change: -2.11 },
 ]
 function App() {
+  const [favorites, setFavorites, favoritesStorageError] = useSavedState('vanta-favorites-v1', defaultFavorites, decodeFavorites)
   const [marketData, setMarketData] = useState(fallbackMarkets)
   const [selected, setSelected] = useState('BTCUSDT')
   const [query, setQuery] = useState('')
@@ -40,7 +43,7 @@ function App() {
         const tickerMap = new Map(tickers.map((ticker) => [ticker.symbol, ticker]))
         const liveMarkets = info.symbols.filter((item) => item.quoteAsset === 'USDT' && item.contractType === 'PERPETUAL' && item.status === 'TRADING').map((item) => {
           const ticker = tickerMap.get(item.symbol)
-          return { symbol: item.symbol, name: item.baseAsset, quoteVolume: Number(ticker?.quoteVolume ?? 0), price: Number(ticker?.lastPrice ?? 0).toLocaleString('en-US', { maximumFractionDigits: 8 }), change: Number(ticker?.priceChangePercent ?? 0), favorite: item.symbol === 'BTCUSDT' || item.symbol === 'ETHUSDT' }
+          return { symbol: item.symbol, name: item.baseAsset, quoteVolume: Number(ticker?.quoteVolume ?? 0), price: Number(ticker?.lastPrice ?? 0).toLocaleString('en-US', { maximumFractionDigits: 8 }), change: Number(ticker?.priceChangePercent ?? 0) }
         })
         if (liveMarkets.length) setMarketData(liveMarkets)
       } catch { /* Public API is optional; fallback data keeps the scanner available. */ }
@@ -64,10 +67,10 @@ function App() {
     return () => socket.close()
   }, [])
 
-  const filteredMarkets = useMemo(() => marketData.map((market) => market.symbol === selected && chartQuote?.symbol === selected
+  const filteredMarkets = useMemo(() => marketData.map((market) => ({ ...market, favorite: favorites.includes(market.symbol) })).map((market) => market.symbol === selected && chartQuote?.symbol === selected
     ? { ...market, price: formatPrice(chartQuote.price), pulse: chartQuote.pulse, direction: chartQuote.direction }
-    : market).filter((market) => `${market.symbol} ${market.name}`.toLowerCase().includes(query.toLowerCase())).sort((first, second) => Number(second.favorite) - Number(first.favorite)), [marketData, query, selected, chartQuote])
-  const toggleFavorite = (symbol: string) => setMarketData((current) => current.map((market) => market.symbol === symbol ? { ...market, favorite: !market.favorite } : market))
+    : market).filter((market) => `${market.symbol} ${market.name}`.toLowerCase().includes(query.toLowerCase())).sort((first, second) => Number(second.favorite) - Number(first.favorite)), [marketData, query, selected, chartQuote, favorites])
+  const toggleFavorite = (symbol: string) => setFavorites((current) => current.includes(symbol) ? current.filter((item) => item !== symbol) : [...current, symbol])
 
   useEffect(() => {
     const handleSpace = (event: KeyboardEvent) => {
@@ -91,6 +94,7 @@ function App() {
           {scanner ? <BreakoutScanner markets={marketData} onSelect={(symbol) => { setSelected(symbol); setChartRequest({ id: Date.now(), frame: '5m' }) }} /> : <>
           <div className="search-box"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search symbol..." /><kbd>/</kbd></div>
           <div className="filters"><span>ALL {marketData.length}</span><button><Filter size={13} /> Filters</button></div>
+          {favoritesStorageError && <p role="status">Не вдалося зберегти обране: сховище браузера недоступне.</p>}
           <div className="market-list">
             {filteredMarkets.map((market) => <button key={market.symbol} className={`market-row ${selected === market.symbol ? 'selected' : ''}`} onClick={() => setSelected(market.symbol)}><span className={`coin-icon coin-${market.symbol.slice(0, 3)}`}>{market.symbol.slice(0, 1)}</span><span className="market-name"><strong>{market.symbol}</strong><small>{market.name}</small></span><span className="market-data"><strong key={market.pulse} className={`price-${market.direction ?? 'up'}`}>{market.price}</strong><small className={market.change >= 0 ? 'positive' : 'negative'}>{market.change >= 0 ? '+' : ''}{market.change.toFixed(2)}%</small></span><span className={`favorite-button ${market.favorite ? 'is-favorite' : ''}`} role="button" aria-label={`${market.favorite ? 'Remove' : 'Add'} ${market.symbol} ${market.favorite ? 'from' : 'to'} favorites`} onClick={(event) => { event.stopPropagation(); toggleFavorite(market.symbol) }}><Star size={12} fill={market.favorite ? 'currentColor' : 'none'} /></span></button>)}
           </div>

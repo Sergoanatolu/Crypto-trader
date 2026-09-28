@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { Crosshair, TrendingUp, Minus, Square, Pencil, Undo2, Trash2, Eye, EyeOff } from 'lucide-react'
 import type { IChartApi, ISeriesApi, Logical, UTCTimestamp } from 'lightweight-charts'
 
-type Tool = 'cursor' | 'trend' | 'horizontal' | 'rectangle' | 'brush'
-type Point = { time: number; price: number }
-type Shape = { id: string; tool: Exclude<Tool, 'cursor'>; points: Point[]; color: string; width: number }
+import { useSavedState } from './useSavedState'
+import { decodeShapes } from './savedChartState'
+import type { Point, Shape } from './savedChartState'
+
+type Tool = 'cursor' | Shape['tool']
 export type DrawingChart = { chart: IChartApi; candles: ISeriesApi<'Candlestick'>; duration: number }
 const tools = [
   { id: 'cursor', label: 'Курсор / вибір', icon: Crosshair },
@@ -21,23 +23,10 @@ export function DrawingTools({ api, storageKey }: { api: DrawingChart; storageKe
   const [width, setWidth] = useState(2)
   const [hidden, setHidden] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
-  const [shapes, setShapes] = useState<Shape[]>(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(storageKey) ?? '[]')
-      return Array.isArray(saved) ? saved.filter((s) => typeof s.id === 'string' && ['trend', 'horizontal', 'rectangle', 'brush'].includes(s.tool) && typeof s.color === 'string' && [1, 2, 3, 4].includes(s.width) && Array.isArray(s.points) && s.points.length > 0 && s.points.every((p: Point) => Number.isFinite(p.time) && Number.isFinite(p.price))) : []
-    } catch { return [] }
-  })
+  const [shapes, setShapes, storageError] = useSavedState<Shape[]>(storageKey, [], decodeShapes)
   const draft = useRef<Shape | null>(null)
   const snapshot = useRef({ shapes, hidden, selected })
   useEffect(() => { snapshot.current = { shapes, hidden, selected } }, [shapes, hidden, selected])
-  const [storageError, setStorageError] = useState(false)
-  useEffect(() => {
-    let cancelled = false
-    let failed = false
-    try { localStorage.setItem(storageKey, JSON.stringify(shapes)) } catch { failed = true }
-    queueMicrotask(() => { if (!cancelled) setStorageError(failed) })
-    return () => { cancelled = true }
-  }, [shapes, storageKey])
 
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
@@ -47,7 +36,7 @@ export function DrawingTools({ api, storageKey }: { api: DrawingChart; storageKe
     }
     window.addEventListener('keydown', key)
     return () => window.removeEventListener('keydown', key)
-  }, [])
+  }, [setShapes])
 
   useEffect(() => {
     const element = canvas.current
