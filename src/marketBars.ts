@@ -1,7 +1,18 @@
 import type { Bar } from './levels'
 
+export class MarketRateLimitError extends Error {
+  retryMs: number
+  constructor(status: number, retryAfter: string | null) {
+    super(`Binance: ${status}`)
+    const seconds = Number(retryAfter)
+    const until = Date.parse(retryAfter ?? '') - Date.now()
+    this.retryMs = Math.max(300000, Number.isFinite(seconds) ? seconds * 1000 : Number.isFinite(until) ? until : 0)
+  }
+}
+
 export async function fetchBars(symbol: string, frame: string, signal: AbortSignal, end?: number): Promise<Bar[]> {
   const response = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${frame.toLowerCase()}&limit=1000${end === undefined ? '' : `&endTime=${end}`}`, { signal: AbortSignal.any([signal, AbortSignal.timeout(12000)]) })
+  if (response.status === 429 || response.status === 418) throw new MarketRateLimitError(response.status, response.headers.get('Retry-After'))
   if (!response.ok) throw new Error(`Binance: ${response.status}`)
   const rows: unknown = await response.json()
   if (!Array.isArray(rows)) throw new Error('Invalid candles')
