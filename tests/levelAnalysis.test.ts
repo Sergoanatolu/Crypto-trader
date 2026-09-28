@@ -63,6 +63,12 @@ test('far away volume spikes do not create high breakout pressure', () => {
   assert.equal(result.pressure, 'Низький')
 })
 
+test('5M levels get higher timeframe confluence but do not confirm higher levels themselves', () => {
+  const groups = ['5M', '1H', '4H'].map((frame) => ({ frame, levels: [{ ...level, sourceFrame: frame }] }))
+  assert.deepEqual(analyzeLevel({ ...level, sourceFrame: '5M' }, history(), groups).matchingFrames, ['1H', '4H'])
+  assert.deepEqual(analyzeLevel({ ...level, sourceFrame: '1H' }, history(), groups).matchingFrames, ['4H'])
+})
+
 test('empty or flat data does not invent scores', () => {
   assert.equal(analyzeLevel(level, []).strength, null)
   assert.equal(analyzeLevel(level, [bar(21, 100, 100, 100)]).pressure, null)

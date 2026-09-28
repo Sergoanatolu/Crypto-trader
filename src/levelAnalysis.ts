@@ -13,7 +13,7 @@ export function analyzeLevel(level: Level, bars: Bar[], otherFrames: FrameLevels
   const zone = atr * 0.25
   const direction = level.kind === 'high' ? 1 : -1
   const away = (price: number) => direction * (level.price - price)
-  const matchingFrames = otherFrames.filter(({ frame, levels }) => frame !== level.sourceFrame && levels.some((other) => other.kind === level.kind && Math.abs(other.price - level.price) <= zone)).map(({ frame }) => frame)
+  const matchingFrames = otherFrames.filter(({ frame, levels }) => frame !== level.sourceFrame && frame !== '5M' && levels.some((other) => other.kind === level.kind && Math.abs(other.price - level.price) <= zone)).map(({ frame }) => frame)
   const last = bars.at(-1)
   const base = { level, atr, zone, matchingFrames }
   if (!last || atr <= 0) return { ...base, strength: null, tests: 0, rebounds: 0, averageBounce: null, relativeVolume: null, pressure: null, reasons: ['Недостатньо даних'], state: 'Недостатньо даних' }

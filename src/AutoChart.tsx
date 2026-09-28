@@ -209,13 +209,13 @@ export function AutoChart({ symbol, onPrice, chartRequest }: { symbol: string; o
           refreshInsights()
         })
         lines.current = levels.map((level) => {
-          const line = chart.addSeries(LineSeries, { title: level.sourceFrame ?? '', color: level.kind === 'high' ? '#3868ff' : '#24b7a5', lineWidth: 2, pointMarkersVisible: false, crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: true, visible: visible.current, priceFormat, autoscaleInfoProvider: () => null })
+          const line = chart.addSeries(LineSeries, { title: level.sourceFrame ?? '', color: level.kind === 'high' ? '#3868ff' : '#24b7a5', lineWidth: level.sourceFrame === '5M' ? 1 : 2, lineStyle: level.sourceFrame === '5M' ? 2 : 0, pointMarkersVisible: false, crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: true, visible: visible.current, priceFormat, autoscaleInfoProvider: () => null })
           line.setData([{ time: Math.max(level.time, firstChartTime) as UTCTimestamp, value: level.price }, { time: lastTime as UTCTimestamp, value: level.price }])
           return line
         })
         const count = Math.min(all.length, frame === '5m' ? 2200 : 500)
         chart.timeScale().setVisibleLogicalRange({ from: all.length - count, to: all.length + 12 })
-        readyStatus = levels.length ? `Рівнів: ${levels.length}${huntGroups ? ' · 1H / 4H → 5M' : ''} · ${day} · Київ` : 'Недостатньо підтверджених екстремумів'
+        readyStatus = levels.length ? `Рівнів: ${levels.length}${huntGroups ? ' · 5M пунктир / 1H / 4H' : ''} · ${day} · Київ` : 'Недостатньо підтверджених екстремумів'
         setStatus(readyStatus)
         startSocket()
       } catch {
