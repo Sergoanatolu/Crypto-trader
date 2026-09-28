@@ -37,6 +37,7 @@ export function AutoChart({ symbol, onPrice }: { symbol: string; onPrice: (symbo
   const [error, setError] = useState(false)
   const [hoveredVolume, setHoveredVolume] = useState<number | null>(null)
   const [insights, setInsights] = useState<{ identity: string; items: LevelAnalysis[]; unavailableFrames: string[]; updatedAt: number | null } | null>(null)
+  const [selectedLevel, setSelectedLevel] = useState<{ identity: string; time: number; kind: Level['kind'] } | null>(null)
   const lines = useRef<ISeriesApi<'Line'>[]>([])
   const visible = useRef(showLevels)
 
@@ -52,6 +53,13 @@ export function AutoChart({ symbol, onPrice }: { symbol: string; onPrice: (symbo
     visible.current = showLevels
     lines.current.forEach((line) => line.applyOptions({ visible: showLevels }))
   }, [showLevels])
+
+  useEffect(() => {
+    if (!selectedLevel) return
+    const close = (event: KeyboardEvent) => { if (event.key === 'Escape') setSelectedLevel(null) }
+    window.addEventListener('keydown', close)
+    return () => window.removeEventListener('keydown', close)
+  }, [selectedLevel])
 
   useEffect(() => {
     if (!container.current) return
@@ -72,6 +80,7 @@ export function AutoChart({ symbol, onPrice }: { symbol: string; onPrice: (symbo
     const volumesByTime = new Map<number, number>()
     let hoveredTime: number | null = null
     setHoveredVolume(null)
+    setSelectedLevel(null)
     const chart = createChart(container.current, {
       autoSize: true,
       localization: { priceFormatter: formatPrice },
@@ -90,6 +99,22 @@ export function AutoChart({ symbol, onPrice }: { symbol: string; onPrice: (symbo
       setHoveredVolume(hoveredTime === null ? null : volumesByTime.get(hoveredTime) ?? null)
     }
     chart.subscribeCrosshairMove(handleCrosshairMove)
+    const handleLevelClick: Parameters<typeof chart.subscribeClick>[0] = (event) => {
+      const point = event.point
+      if (!visible.current || !point || point.x < 0 || point.y < 0 || point.x >= chart.paneSize().width || point.y >= chart.paneSize().height) return
+      let nearest: Level | null = null
+      let nearestDistance = 8 // A small pixel tolerance also makes thin lines tappable.
+      const endX = chart.timeScale().timeToCoordinate(lastTime as UTCTimestamp)
+      for (const level of analysisLevels) {
+        const y = candles.priceToCoordinate(level.price)
+        const startX = chart.timeScale().timeToCoordinate(level.time as UTCTimestamp)
+        if (y === null || startX === null || endX === null || point.x < startX || point.x > endX) continue
+        const distance = Math.abs(point.y - y)
+        if (distance <= nearestDistance) { nearest = level; nearestDistance = distance }
+      }
+      setSelectedLevel(nearest ? { identity, time: nearest.time, kind: nearest.kind } : null)
+    }
+    chart.subscribeClick(handleLevelClick)
     const duration = frame === '1W' ? 604800 : frame === '1D' ? 86400 : frame.endsWith('H') ? Number.parseInt(frame) * 3600 : Number.parseInt(frame) * 60
     setDrawingApi({ chart, candles, duration, identity: `${symbol}-${frame}-${day}-${retry}` })
     lines.current = []
@@ -187,14 +212,18 @@ export function AutoChart({ symbol, onPrice }: { symbol: string; onPrice: (symbo
       }
     }
     void load()
-    return () => { stopped = true; controller.abort(); clearTimeout(reconnect); socket?.close(); lines.current = []; chart.unsubscribeCrosshairMove(handleCrosshairMove); chart.remove() }
+    return () => { stopped = true; controller.abort(); clearTimeout(reconnect); socket?.close(); lines.current = []; chart.unsubscribeCrosshairMove(handleCrosshairMove); chart.unsubscribeClick(handleLevelClick); chart.remove() }
   }, [symbol, frame, day, retry, onPrice])
 
+  const identity = `${symbol}-${frame}-${day}-${retry}`
+  const selectedInsight = selectedLevel?.identity === identity && insights?.identity === identity
+    ? insights.items.find((item) => item.level.time === selectedLevel.time && item.level.kind === selectedLevel.kind) : undefined
+
   return <div className="local-chart-shell auto-chart-shell">
-    <div className="local-chart-tools"><strong>{symbol}</strong><div className="chart-timeframes">{frames.map((value) => <button key={value} className={frame === value ? 'tool-active' : ''} onClick={() => setFrame(value)}>{value}</button>)}</div><button aria-pressed={showLevels} className={showLevels ? 'tool-active' : ''} onClick={() => setShowLevels((value) => !value)}>Авто рівні</button></div>
+    <div className="local-chart-tools"><strong>{symbol}</strong><div className="chart-timeframes">{frames.map((value) => <button key={value} className={frame === value ? 'tool-active' : ''} onClick={() => setFrame(value)}>{value}</button>)}</div><button aria-pressed={showLevels} className={showLevels ? 'tool-active' : ''} onClick={() => { setSelectedLevel(null); setShowLevels((value) => !value) }}>Авто рівні</button></div>
     <div className="levels-status" role="status"><span className="candle-volume">Обсяг: {hoveredVolume === null ? '—' : `${volumeFormatter.format(hoveredVolume)} ${symbol.replace(/USDT$/, '')}`}</span><span className="level-high">● Максимуми</span><span className="level-low">● Мінімуми</span><span>{status}</span>{error && <button onClick={() => setRetry((value) => value + 1)}>Повторити</button>}</div>
     <div className="local-chart" ref={container} />
-    {showLevels && <LevelInsights error={error} items={insights?.identity === `${symbol}-${frame}-${day}-${retry}` ? insights.items : []} frame={frame} pending={!error && insights?.identity !== `${symbol}-${frame}-${day}-${retry}`} unavailableFrames={insights?.identity === `${symbol}-${frame}-${day}-${retry}` ? insights.unavailableFrames : []} updatedAt={insights?.identity === `${symbol}-${frame}-${day}-${retry}` ? insights.updatedAt : null} />}
+    {showLevels && selectedInsight && insights && <LevelInsights key={`${identity}-${selectedInsight.level.kind}-${selectedInsight.level.time}`} error={error} items={[selectedInsight]} frame={frame} pending={false} unavailableFrames={insights.unavailableFrames} updatedAt={insights.updatedAt} onClose={() => setSelectedLevel(null)} />}
     <OrderBookDepth key={symbol} symbol={symbol} />
     {drawingApi?.identity === `${symbol}-${frame}-${day}-${retry}` && <DrawingTools key={drawingApi.identity} api={drawingApi} storageKey={`vanta-drawings-v2-${symbol}`} />}
   </div>

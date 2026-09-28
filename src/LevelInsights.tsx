@@ -1,12 +1,10 @@
-import { useState } from 'react'
 import type { LevelAnalysis } from './levelAnalysis'
 import { formatPrice } from './prices'
 
-export function LevelInsights({ items, frame, pending, unavailableFrames, updatedAt, error }: { items: LevelAnalysis[]; frame: string; pending: boolean; unavailableFrames: string[]; updatedAt: number | null; error: boolean }) {
-  const [collapsed, setCollapsed] = useState(false)
+export function LevelInsights({ items, frame, pending, unavailableFrames, updatedAt, error, onClose }: { items: LevelAnalysis[]; frame: string; pending: boolean; unavailableFrames: string[]; updatedAt: number | null; error: boolean; onClose: () => void }) {
   return <aside className="level-insights" aria-label="Аналіз сили рівнів">
-    <button className="depth-heading" onClick={() => setCollapsed(!collapsed)} aria-expanded={!collapsed}><strong>Сила рівнів · {frame}</strong><span>{collapsed ? '+' : '−'}</span></button>
-    {!collapsed && <div className="insights-body">
+    <div className="depth-heading"><strong>Сила рівня · {frame}</strong><button className="insights-close" onClick={onClose} aria-label="Закрити аналіз рівня" title="Закрити (Esc)">×</button></div>
+    <div className="insights-body">
       <p>За закритими свічками{updatedAt ? ` · ${new Date(updatedAt * 1000).toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' })} Київ` : ''}</p>
       {pending && <p role="status">Завантаження рівнів…</p>}
       {error && <p role="status">Аналіз недоступний: не вдалося завантажити свічки.</p>}
@@ -23,6 +21,6 @@ export function LevelInsights({ items, frame, pending, unavailableFrames, update
       <p className="insights-note">Ймовірність пробою: ще не відкалібрована. Бали сили не є відсотком імовірності.</p>
       {unavailableFrames.length > 0 && <p>Збіг таймфреймів: недоступні {unavailableFrames.join(', ')}. Оцінка може бути занижена.</p>}
       <details><summary>Як рахуємо</summary><p>Зона рівня ±0,25 ATR. ATR — середній істинний діапазон останніх 21 закритих свічок. Новий тест рахується після відходу закриття на 1 ATR; відбій — відхід на 1 ATR у початковий бік. Розмір відскоку — найбільша відстань закриття до наступного тесту або поточного моменту.</p><p>Сила: до 25 балів за вираженість екстремуму, 30 за кількість відбоїв, 30 за їх середній розмір, 15 за збіги з вищими 1H / 4H / 1D. Це початкова евристика. Обсяг порівнюємо з попередніми 20 свічками. Закріплення — два закриття поспіль за рівнем далі ніж 0,3 ATR. Аналіз оновлюється після закриття свічки; ліквідність стакана до оцінки не входить.</p></details>
-    </div>}
+    </div>
   </aside>
 }
