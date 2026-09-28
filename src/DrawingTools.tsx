@@ -5,6 +5,7 @@ import type { IChartApi, ISeriesApi, Logical, UTCTimestamp } from 'lightweight-c
 import { useSavedState } from './useSavedState'
 import { decodeShapes } from './savedChartState'
 import type { Point, Shape } from './savedChartState'
+import type { Level } from './levels'
 
 type Tool = 'cursor' | Shape['tool']
 export type DrawingChart = { chart: IChartApi; candles: ISeriesApi<'Candlestick'>; duration: number }
@@ -16,7 +17,7 @@ const tools = [
   { id: 'brush', label: 'Пензель', icon: Pencil },
 ] as const
 
-export function DrawingTools({ api, storageKey }: { api: DrawingChart; storageKey: string }) {
+export function DrawingTools({ api, storageKey, autoLevels }: { api: DrawingChart; storageKey: string; autoLevels: Level[] }) {
   const canvas = useRef<HTMLCanvasElement>(null)
   const [tool, setTool] = useState<Tool>('cursor')
   const [color, setColor] = useState('#22c9e6')
@@ -25,8 +26,8 @@ export function DrawingTools({ api, storageKey }: { api: DrawingChart; storageKe
   const [selected, setSelected] = useState<string | null>(null)
   const [shapes, setShapes, storageError] = useSavedState<Shape[]>(storageKey, [], decodeShapes)
   const draft = useRef<Shape | null>(null)
-  const snapshot = useRef({ shapes, hidden, selected })
-  useEffect(() => { snapshot.current = { shapes, hidden, selected } }, [shapes, hidden, selected])
+  const snapshot = useRef({ shapes, hidden, selected, autoLevels })
+  useEffect(() => { snapshot.current = { shapes, hidden, selected, autoLevels } }, [shapes, hidden, selected, autoLevels])
 
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
@@ -66,6 +67,18 @@ export function DrawingTools({ api, storageKey }: { api: DrawingChart; storageKe
       ctx.clearRect(0, 0, w, h)
       paths = []
       const state = snapshot.current
+      // Continue automatic swing lines through the empty space to the price axis.
+      // The series supplies the price label; this overlay keeps the ray horizontal.
+      const lastBar = api.candles.data().at(-1)
+      if (lastBar && typeof lastBar.time === 'number') {
+        const endX = api.chart.timeScale().timeToCoordinate(lastBar.time)
+        for (const level of state.autoLevels) {
+          const y = api.candles.priceToCoordinate(level.price)
+          if (endX === null || y === null || endX >= w) continue
+          ctx.beginPath(); ctx.moveTo(Math.max(0, endX), y); ctx.lineTo(w, y)
+          ctx.strokeStyle = '#22c9e6'; ctx.lineWidth = 2; ctx.setLineDash([]); ctx.stroke()
+        }
+      }
       const all = state.hidden ? [] : [...state.shapes, ...(draft.current ? [draft.current] : [])]
       for (const shape of all) {
         const points = shape.points.map(toScreen)
