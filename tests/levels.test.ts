@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
-import { dayStart, findLevels, kyivDay } from '../src/levels.ts'
+import { dayStart, findLevels, kyivDay, nearestApproachLevel } from '../src/levels.ts'
 
 test('insufficient and flat history produces no levels', () => {
   assert.deepEqual(findLevels([]), [])
@@ -29,4 +29,35 @@ test('Kyiv midnight in summer, winter and DST transition days', () => {
     assert.equal(dayStart(new Date(now)), Date.parse(expected))
     assert.notEqual(kyivDay(new Date(Date.parse(expected) - 1)), kyivDay(new Date(now)))
   }
+})
+
+test('repeated peaks form one resistance at the outer edge of their zone', () => {
+  const bars = Array.from({ length: 180 }, (_, i) => ({ time: i, open: 100, close: 100, high: 101, low: 99, volume: 1 }))
+  bars[30].high = 120
+  bars[75].high = 120.2
+  bars[120].high = 119.9
+  const resistance = findLevels(bars).find((level) => level.kind === 'high')!
+  assert.equal(resistance.pivotCount, 3)
+  assert.equal(resistance.price, 120.2)
+  assert.equal(resistance.zoneLow, 119.9)
+  const mirrored = bars.map((bar) => ({ ...bar, open: 200 - bar.open, close: 200 - bar.close, high: 200 - bar.low, low: 200 - bar.high }))
+  const support = findLevels(mirrored).find((level) => level.kind === 'low')!
+  assert.equal(support.pivotCount, 3)
+  assert.ok(Math.abs(support.price - 79.8) < 1e-10)
+})
+
+test('a flat plateau is not multiple independent rejections', () => {
+  const bars = Array.from({ length: 120 }, (_, i) => ({ time: i, open: 100, close: 100, high: 101, low: 99, volume: 1 }))
+  for (let i = 40; i < 48; i++) bars[i].high = 120
+  assert.equal(findLevels(bars).find((level) => level.kind === 'high')?.pivotCount, 1)
+})
+
+test('approach selection skips nearer single peaks and already crossed resistance', () => {
+  const levels = [
+    { time: 1, price: 101, kind: 'high' as const, score: 4, pivotCount: 1 },
+    { time: 2, price: 102, kind: 'high' as const, score: 4, pivotCount: 3, zoneLow: 101.8 },
+  ]
+  assert.equal(nearestApproachLevel(levels, 100, true), levels[1])
+  assert.equal(nearestApproachLevel(levels, 100, false), levels[0])
+  assert.equal(nearestApproachLevel(levels, 103, true), undefined)
 })

@@ -14,6 +14,7 @@ export function LevelInsights({ items, frame, pending, unavailableFrames, update
         <div className="level-card-title"><strong className={item.level.kind === 'high' ? 'level-high' : 'level-low'}>{item.level.kind === 'high' ? 'Опір' : 'Підтримка'} · {formatPrice(item.level.price)} {item.level.sourceFrame && `· ${item.level.sourceFrame}`}</strong><b>{item.strength === null ? '—' : `${item.strength}/100`}</b></div>
         {item.level.sourceFrame && <p>Рівень {item.level.sourceFrame} · аналіз останніх 999 закритих свічок 5M. Збіг перевіряємо з 1H / 4H без власного ТФ. Рівні фіксуються на початок дня за Києвом.</p>}
         <meter min={0} max={100} value={item.strength ?? 0} aria-label="Сила рівня" />
+        {item.level.pivotCount !== undefined && <p>Форма рівня: {item.level.pivotCount} окремих екстремумів на вихідному ТФ. Зона {formatPrice(item.level.zoneLow ?? item.level.price)}–{formatPrice(item.level.zoneHigh ?? item.level.price)}.</p>}
         <p>{item.tests} тестів · {item.rebounds} відбоїв · середній відскок {item.averageBounce === null ? '—' : `${item.averageBounce.toFixed(1)} ATR`}</p>
         <p>Збіг: {item.matchingFrames.join(' / ') || 'не виявлено'} · Обсяг {item.relativeVolume === null ? '—' : `×${item.relativeVolume.toFixed(2)}`}</p>
         <p>{item.state}</p>

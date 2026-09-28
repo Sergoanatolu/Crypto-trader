@@ -1,5 +1,5 @@
 export type Bar = { time: number; open: number; high: number; low: number; close: number; volume: number }
-export type Level = { time: number; price: number; kind: 'high' | 'low'; score: number; sourceFrame?: string }
+export type Level = { time: number; price: number; kind: 'high' | 'low'; score: number; sourceFrame?: string; pivotCount?: number; zoneLow?: number; zoneHigh?: number }
 
 // Confirm pivots with twelve closed bars on both sides; merge nearby prices.
 export function findLevels(bars: Bar[]): Level[] {
@@ -24,14 +24,41 @@ export function findLevels(bars: Bar[]): Level[] {
   }
   const result: Level[] = []
   for (const kind of ['high', 'low'] as const) {
+    const clusters: Level[][] = []
+    for (const candidate of candidates.filter((level) => level.kind === kind).sort((a, b) => a.price - b.price)) {
+      const cluster = clusters.at(-1)
+      if (cluster && candidate.price - cluster[0].price <= atr * 0.5) cluster.push(candidate)
+      else clusters.push([candidate])
+    }
+    const grouped = clusters.map((cluster): Level => {
+      const independent: Level[] = []
+      for (const pivot of cluster.sort((a, b) => a.time - b.time)) {
+        const previous = independent.at(-1)
+        if (previous) {
+          const between = bars.filter((bar) => bar.time > previous.time && bar.time < pivot.time)
+          // Adjacent plateau candles are one test; require a real retreat between tests.
+          if (between.length < radius || !between.some((bar) => kind === 'high' ? bar.close <= Math.min(previous.price, pivot.price) - atr : bar.close >= Math.max(previous.price, pivot.price) + atr)) continue
+        }
+        independent.push(pivot)
+      }
+      const prices = cluster.map((pivot) => pivot.price)
+      const zoneLow = Math.min(...prices)
+      const zoneHigh = Math.max(...prices)
+      return { ...independent[0], price: kind === 'high' ? zoneHigh : zoneLow, score: Math.max(...cluster.map((pivot) => pivot.score)), pivotCount: independent.length, zoneLow, zoneHigh }
+    })
     const selected: Level[] = []
-    for (const candidate of candidates.filter((level) => level.kind === kind).sort((a, b) => b.score - a.score || b.time - a.time)) {
+    for (const candidate of grouped.sort((a, b) => (b.pivotCount ?? 1) - (a.pivotCount ?? 1) || b.score - a.score || b.time - a.time)) {
       if (selected.every((level) => Math.abs(level.price - candidate.price) > atr * 1.5)) selected.push(candidate)
       if (selected.length === 3) break
     }
     result.push(...selected)
   }
   return result
+}
+
+export function nearestApproachLevel(levels: Level[], price: number, repeatedOnly: boolean): Level | undefined {
+  return levels.filter((level) => !repeatedOnly || ((level.pivotCount ?? 1) >= 2 && (level.kind === 'high' ? price <= (level.zoneLow ?? level.price) : price >= (level.zoneHigh ?? level.price))))
+    .sort((a, b) => Math.abs(a.price - price) - Math.abs(b.price - price))[0]
 }
 
 export function kyivDay(now = new Date()): string {

@@ -3,11 +3,11 @@ import { analyzeLevel } from './levelAnalysis'
 import { distancePercent } from './breakout'
 import { formatPrice } from './prices'
 import { fetchBars, fetchHuntLevels, MarketRateLimitError } from './marketBars'
-import { kyivDay } from './levels'
+import { kyivDay, nearestApproachLevel } from './levels'
 import { selectScannerRows } from './scannerResults'
 
 export type ScanMarket = { symbol: string; quoteVolume?: number; change: number }
-type Row = { symbol: string; price: number; level: number; kind: string; strength: number | null; distance: number; volume: number; change: number; at: number; sourceFrame?: string; pressure: string | null; relativeVolume: number | null; state: string; outdated?: boolean }
+type Row = { symbol: string; price: number; level: number; kind: string; strength: number | null; distance: number; volume: number; change: number; at: number; sourceFrame?: string; pressure: string | null; relativeVolume: number | null; state: string; outdated?: boolean; pivotCount?: number }
 
 export function BreakoutScanner({ markets, onSelect }: { markets: ScanMarket[]; onSelect: (symbol: string) => void }) {
   const latest = useRef(markets)
@@ -21,6 +21,7 @@ export function BreakoutScanner({ markets, onSelect }: { markets: ScanMarket[]; 
   const [run, setRun] = useState(0)
   const [minStrength, setMinStrength] = useState(0)
   const [order, setOrder] = useState<'distance' | 'strength'>('distance')
+  const [repeatedOnly, setRepeatedOnly] = useState(true)
   const [paused, setPaused] = useState(false)
   const [now, setNow] = useState(Date.now)
   const levelCache = useRef(new Map<string, { day: string; groups: Awaited<ReturnType<typeof fetchHuntLevels>> }>())
@@ -73,10 +74,10 @@ export function BreakoutScanner({ markets, onSelect }: { markets: ScanMarket[]; 
           const price = recent.at(-1)?.close
           if (!price) throw new Error('No price')
           const levels = groups.flatMap((group) => group.levels)
-          const nearest = levels.sort((a, b) => Math.abs(a.price - price) - Math.abs(b.price - price))[0]
+          const nearest = nearestApproachLevel(levels, price, repeatedOnly)
           if (!stopped && nearest) {
             const analysis = analyzeLevel(nearest, closed, groups)
-            setRows((current) => [...current.filter((row) => row.symbol !== market.symbol), { symbol: market.symbol, price, level: nearest.price, kind: nearest.kind, strength: analysis.strength, distance: distancePercent(price, nearest.price), volume: market.quoteVolume!, change: market.change, at: Date.now(), sourceFrame: nearest.sourceFrame, pressure: analysis.pressure, relativeVolume: analysis.relativeVolume, state: analysis.state }])
+            setRows((current) => [...current.filter((row) => row.symbol !== market.symbol), { symbol: market.symbol, price, level: nearest.price, kind: nearest.kind, strength: analysis.strength, distance: distancePercent(price, nearest.price), volume: market.quoteVolume!, change: market.change, at: Date.now(), sourceFrame: nearest.sourceFrame, pressure: analysis.pressure, relativeVolume: analysis.relativeVolume, state: analysis.state, pivotCount: nearest.pivotCount }])
           } else if (!stopped) {
             setRows((current) => current.filter((row) => row.symbol !== market.symbol))
           }
@@ -98,10 +99,12 @@ export function BreakoutScanner({ markets, onSelect }: { markets: ScanMarket[]; 
     }
     void scan()
     return () => { stopped = true; controller.abort(); clearTimeout(timer) }
-  }, [volume, limit, run, hasMarkets, paused])
+  }, [volume, limit, run, hasMarkets, paused, repeatedOnly])
   const visibleRows = selectScannerRows(rows, distance, minStrength, order, now)
   return <div className="breakout-scanner">
     <strong>Полювання · 5M</strong>
+    <label>Тип рівнів<select value={repeatedOnly ? 'repeated' : 'all'} onChange={(e) => { setRows([]); setRepeatedOnly(e.target.value === 'repeated') }}><option value="repeated">Повторні відбої</option><option value="all">Усі рівні</option></select></label>
+    <p>«Повторні відбої»: щонайменше дві окремі вершини або западини в межах 0,5 ATR із відходом між ними. Ціна під опором або над підтримкою; відстань обмежує фільтр нижче. Це пошук форми рівня, а не гарантія пробою.</p>
     <p>Рівні 5M / 1H / 4H · сигнали 5M. Шукаємо найближчий рівень серед усіх трьох ТФ. Реакції, обсяг і пробій оцінюються за останніми 999 закритими свічками 5M.</p>
     <p>{limit === 0 ? 'Усі доступні монети' : `До ${limit} найбільших монет за обсягом`}, які проходять фільтр. Великий список перевіряється кілька хвилин; результати з’являються поступово. Новий цикл через 5 хв після завершення.</p>
     <label>Кількість монет<select value={limit} onChange={(e) => setLimit(Number(e.target.value))}>{[12, 25, 50, 100, 200, 500, 0].map((v) => <option key={v} value={v}>{v === 0 ? 'Усі' : v}</option>)}</select></label>
@@ -118,6 +121,7 @@ export function BreakoutScanner({ markets, onSelect }: { markets: ScanMarket[]; 
       {(row.outdated || now - row.at > 600000) && <small className="scan-stale">{row.outdated ? 'Попередній результат · ще не оновлено' : 'Дані старші 10 хв · перевірте графік'}</small>}
       <strong>{row.symbol} <span>{row.distance.toFixed(2)}%</span></strong>
       <small>{row.kind === 'high' ? 'Опір' : 'Підтримка'} {formatPrice(row.level)} · {row.sourceFrame} · {row.strength ?? '—'}/100</small>
+      <small>Окремих екстремумів на {row.sourceFrame}: {row.pivotCount ?? 1}</small>
       <small>5M: {row.state} · Тиск {row.pressure ?? '—'} · Обсяг {row.relativeVolume === null ? '—' : `×${row.relativeVolume.toFixed(2)}`}</small>
       <small>Ціна {formatPrice(row.price)} · {row.change.toFixed(2)}%</small>
       <small>{(row.volume / 1e6).toFixed(0)} млн USDT · {new Date(row.at).toLocaleTimeString('uk-UA')}</small>
