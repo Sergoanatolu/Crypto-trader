@@ -10,8 +10,8 @@ test('quality filter caps each side and removes near duplicates', () => {
   assert.deepEqual(result.map((entry) => entry.level.price), [110, 120, 90, 80])
 })
 
-test('weak, single-pivot and broken levels are excluded without fallback', () => {
-  assert.deepEqual(selectQualityLevels([item(110, 'high', 39), item(120, 'high', 80, 1), { ...item(130), state: 'Закріплення за рівнем' }]), [])
+test('weak, fewer than three rebounds and broken levels are excluded without fallback', () => {
+  assert.deepEqual(selectQualityLevels([item(110, 'high', 39), { ...item(120, 'high', 80), rebounds: 2 }, { ...item(130), state: 'Закріплення за рівнем' }]), [])
 })
 
 test('better repeated level wins over a nearby duplicate', () => {

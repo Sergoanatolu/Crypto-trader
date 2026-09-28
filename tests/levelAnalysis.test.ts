@@ -26,6 +26,12 @@ test('support and resistance are symmetric', () => {
   assert.equal(high.pressure, low.pressure)
 })
 
+test('three separate departures count as three rebounds; an unfinished fourth touch does not', () => {
+  const bars = [...history(), bar(21, 99.8, 100), bar(22, 99.8, 100), bar(23, 97), bar(24, 99.8, 100), bar(25, 97), bar(26, 99.8, 100), bar(27, 97), bar(28, 99.8, 100)]
+  assert.equal(analyzeLevel(level, bars).rebounds, 3)
+  assert.equal(analyzeLevel(level, bars).tests, 4)
+})
+
 test('two closes beyond the zone show a break, not a pending breakout pressure', () => {
   const result = analyzeLevel(level, [...history(), bar(21, 101), bar(22, 102)])
   assert.equal(result.state, 'Закріплення за рівнем')
