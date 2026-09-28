@@ -1,3 +1,5 @@
+import { fetchBars } from './marketBars'
+import { useLevelAlerts, watchKey } from './useLevelAlerts'
 import { useEffect, useRef, useState } from 'react'
 import { CandlestickSeries, ColorType, createChart, LineSeries } from 'lightweight-charts'
 import type { ISeriesApi, UTCTimestamp } from 'lightweight-charts'
@@ -14,22 +16,19 @@ import { OrderBookDepth } from './OrderBookDepth'
 const frames = ['1m', '5m', '15m', '1H', '4H', '1D', '1W']
 const volumeFormatter = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 8 })
 
-async function fetchBars(symbol: string, frame: string, signal: AbortSignal, end?: number): Promise<Bar[]> {
-  const response = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${frame.toLowerCase()}&limit=1000${end === undefined ? '' : `&endTime=${end}`}`, { signal })
-  if (!response.ok) throw new Error(`Binance: ${response.status}`)
-  const rows: unknown = await response.json()
-  if (!Array.isArray(rows)) throw new Error('Invalid candles')
-  return rows.map((row) => {
-    const bar = { time: Number(row[0]) / 1000, open: Number(row[1]), high: Number(row[2]), low: Number(row[3]), close: Number(row[4]), volume: Number(row[5]) }
-    if (!Object.values(bar).every(Number.isFinite)) throw new Error('Invalid candle')
-    return bar
-  })
-}
-
-export function AutoChart({ symbol, onPrice }: { symbol: string; onPrice: (symbol: string, price: number) => void }) {
+export function AutoChart({ symbol, onPrice, chartRequest }: { symbol: string; onPrice: (symbol: string, price: number) => void; chartRequest?: { id: number; frame: string } }) {
   const container = useRef<HTMLDivElement>(null)
   const [drawingApi, setDrawingApi] = useState<(DrawingChart & { identity: string }) | null>(null)
   const [frame, setFrame] = useState('5m')
+  const [appliedRequest, setAppliedRequest] = useState<number>()
+  if (chartRequest && chartRequest.id !== appliedRequest) {
+    setAppliedRequest(chartRequest.id)
+    setFrame(chartRequest.frame)
+  }
+  const alerts = useLevelAlerts()
+  const alertMonitor = useRef(alerts.evaluate)
+  useEffect(() => { alertMonitor.current = alerts.evaluate }, [alerts.evaluate])
+  const [showAlerts, setShowAlerts] = useState(false)
   const [day, setDay] = useState(kyivDay)
   const [retry, setRetry] = useState(0)
   const [showLevels, setShowLevels] = useState(true)
@@ -73,9 +72,14 @@ export function AutoChart({ symbol, onPrice }: { symbol: string; onPrice: (symbo
     let analysisLevels: Level[] = []
     let otherFrames: FrameLevels[] = []
     let unavailableFrames: string[] = []
+    let liveItems: LevelAnalysis[] = []
+    let livePrice = 0
     const identity = `${symbol}-${frame}-${day}-${retry}`
     const refreshInsights = () => {
-      if (!stopped) setInsights({ identity, items: analysisLevels.map((level) => analyzeLevel(level, analysisBars, otherFrames)).sort((a, b) => Math.abs(a.level.price - (analysisBars.at(-1)?.close ?? 0)) - Math.abs(b.level.price - (analysisBars.at(-1)?.close ?? 0))), unavailableFrames, updatedAt: analysisBars.length ? analysisBars[analysisBars.length - 1].time + duration : null })
+      if (stopped) return
+      liveItems = analysisLevels.map((level) => analyzeLevel(level, analysisBars, otherFrames)).sort((a, b) => Math.abs(a.level.price - (analysisBars.at(-1)?.close ?? 0)) - Math.abs(b.level.price - (analysisBars.at(-1)?.close ?? 0)))
+      setInsights({ identity, items: liveItems, unavailableFrames, updatedAt: analysisBars.length ? analysisBars[analysisBars.length - 1].time + duration : null })
+      if (livePrice > 0) alertMonitor.current(symbol, frame, liveItems, livePrice)
     }
     const volumesByTime = new Map<number, number>()
     let hoveredTime: number | null = null
@@ -132,10 +136,12 @@ export function AutoChart({ symbol, onPrice }: { symbol: string; onPrice: (symbo
           if (hoveredTime === bar.time) setHoveredVolume(bar.volume)
           candles.update({ ...bar, time: bar.time as UTCTimestamp })
           onPrice(symbol, bar.close)
+          livePrice = bar.close
           if (k.x === true) {
             analysisBars = [...analysisBars.filter((existing) => existing.time !== bar.time), bar].sort((a, b) => a.time - b.time)
             refreshInsights()
           }
+          alertMonitor.current(symbol, frame, liveItems, bar.close)
           if (bar.time > lastTime) lines.current.forEach((line) => {
             const first = line.data()[0]
             if (first && 'value' in first) line.update({ time: bar.time as UTCTimestamp, value: first.value })
@@ -181,6 +187,7 @@ export function AutoChart({ symbol, onPrice }: { symbol: string; onPrice: (symbo
         all.forEach((bar) => volumesByTime.set(bar.time, bar.volume))
         candles.setData(all.map((bar) => ({ ...bar, time: bar.time as UTCTimestamp })))
         onPrice(symbol, all[all.length - 1].close)
+        livePrice = all[all.length - 1].close
         lastTime = all[all.length - 1].time
         const levels = findLevels(history)
         analysisLevels = levels
@@ -223,7 +230,11 @@ export function AutoChart({ symbol, onPrice }: { symbol: string; onPrice: (symbo
     <div className="local-chart-tools"><strong>{symbol}</strong><div className="chart-timeframes">{frames.map((value) => <button key={value} className={frame === value ? 'tool-active' : ''} onClick={() => setFrame(value)}>{value}</button>)}</div><button aria-pressed={showLevels} className={showLevels ? 'tool-active' : ''} onClick={() => { setSelectedLevel(null); setShowLevels((value) => !value) }}>Авто рівні</button></div>
     <div className="levels-status" role="status"><span className="candle-volume">Обсяг: {hoveredVolume === null ? '—' : `${volumeFormatter.format(hoveredVolume)} ${symbol.replace(/USDT$/, '')}`}</span><span className="level-high">● Максимуми</span><span className="level-low">● Мінімуми</span><span>{status}</span>{error && <button onClick={() => setRetry((value) => value + 1)}>Повторити</button>}</div>
     <div className="local-chart" ref={container} />
-    {showLevels && selectedInsight && insights && <LevelInsights key={`${identity}-${selectedInsight.level.kind}-${selectedInsight.level.time}`} error={error} items={[selectedInsight]} frame={frame} pending={false} unavailableFrames={insights.unavailableFrames} updatedAt={insights.updatedAt} onClose={() => setSelectedLevel(null)} />}
+    {showLevels && selectedInsight && insights && <LevelInsights key={`${identity}-${selectedInsight.level.kind}-${selectedInsight.level.time}`} error={error} items={[selectedInsight]} frame={frame} pending={false} unavailableFrames={insights.unavailableFrames} updatedAt={insights.updatedAt} onClose={() => setSelectedLevel(null)} volumeThreshold={alerts.volume} nearThreshold={alerts.near} onVolumeChange={alerts.setVolume} onNearChange={alerts.setNear} watched={alerts.watched.includes(watchKey(symbol, frame, selectedInsight))} onWatch={() => alerts.toggle(watchKey(symbol, frame, selectedInsight))} />}
+    <div className="alert-tray"><button onClick={() => setShowAlerts(!showAlerts)} aria-expanded={showAlerts}>Алерти · {alerts.events.length}</button>
+      {showAlerts && <div className="alert-feed"><p>Стеження лише за відкритою монетою та таймфреймом, поки сайт відкритий. Нові події після ввімкнення стеження.</p><button onClick={alerts.clear}>Очистити події</button>{!alerts.events.length && <p>Подій поки немає. Клікніть рівень → «Стежити».</p>}{alerts.events.map((event) => <p key={event.id}>{event.text}</p>)}</div>}
+      <span className="alert-live" role="status">{alerts.events[0]?.text}</span>
+    </div>
     <OrderBookDepth key={symbol} symbol={symbol} />
     {drawingApi?.identity === `${symbol}-${frame}-${day}-${retry}` && <DrawingTools key={drawingApi.identity} api={drawingApi} storageKey={`vanta-drawings-v2-${symbol}`} />}
   </div>

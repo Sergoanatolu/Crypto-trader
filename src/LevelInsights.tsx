@@ -1,7 +1,8 @@
 import type { LevelAnalysis } from './levelAnalysis'
 import { formatPrice } from './prices'
+import { checklist } from './breakout'
 
-export function LevelInsights({ items, frame, pending, unavailableFrames, updatedAt, error, onClose }: { items: LevelAnalysis[]; frame: string; pending: boolean; unavailableFrames: string[]; updatedAt: number | null; error: boolean; onClose: () => void }) {
+export function LevelInsights({ items, frame, pending, unavailableFrames, updatedAt, error, onClose, watched, onWatch, volumeThreshold, nearThreshold, onVolumeChange, onNearChange }: { items: LevelAnalysis[]; frame: string; pending: boolean; unavailableFrames: string[]; updatedAt: number | null; error: boolean; onClose: () => void; watched: boolean; onWatch: () => void; volumeThreshold: number; nearThreshold: number; onVolumeChange: (value: number) => void; onNearChange: (value: number) => void }) {
   return <aside className="level-insights" aria-label="Аналіз сили рівнів">
     <div className="depth-heading"><strong>Сила рівня · {frame}</strong><button className="insights-close" onClick={onClose} aria-label="Закрити аналіз рівня" title="Закрити (Esc)">×</button></div>
     <div className="insights-body">
@@ -17,6 +18,13 @@ export function LevelInsights({ items, frame, pending, unavailableFrames, update
         <p>{item.state}</p>
         <strong className={item.pressure === 'Високий' ? 'pressure-high' : ''}>Тиск на пробій: {item.pressure ?? '—'}</strong>
         <p>{item.reasons.join(' · ')}</p>
+        <div className="setup-checklist"><strong>Умови: {checklist(item, unavailableFrames, volumeThreshold).filter((entry) => entry.passed === true).length} із 4</strong>
+          {checklist(item, unavailableFrames, volumeThreshold).map((entry) => <p key={entry.label}>{entry.passed === null ? '—' : entry.passed ? '✓' : '✗'} {entry.label}{entry.passed === null ? ' · немає даних' : ''}</p>)}
+        </div>
+        <label className="setup-setting">Обсяг у чеклісті<select value={volumeThreshold} onChange={(e) => onVolumeChange(Number(e.target.value))}>{[1, 1.5, 2, 3].map((v) => <option key={v} value={v}>×{v}</option>)}</select></label>
+        <label className="setup-setting">Алерт наближення<select value={nearThreshold} onChange={(e) => onNearChange(Number(e.target.value))}>{[0.1, 0.25, 0.5, 1].map((v) => <option key={v} value={v}>{v}%</option>)}</select></label>
+        <button className="watch-button" aria-pressed={watched} onClick={onWatch}>{watched ? 'Припинити стеження' : 'Стежити за рівнем'}</button>
+        <p>Алерти: наближення, високий тиск, закриття та закріплення за рівнем. Лише для відкритого графіка. Пороги спільні для рівнів.</p>
       </article>)}
       <p className="insights-note">Ймовірність пробою: ще не відкалібрована. Бали сили не є відсотком імовірності.</p>
       {unavailableFrames.length > 0 && <p>Збіг таймфреймів: недоступні {unavailableFrames.join(', ')}. Оцінка може бути занижена.</p>}
