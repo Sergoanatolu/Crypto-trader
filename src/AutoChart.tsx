@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { CandlestickSeries, ColorType, createChart, LineSeries } from 'lightweight-charts'
 import type { ISeriesApi, UTCTimestamp } from 'lightweight-charts'
 import { dayStart, findLevels, kyivDay } from './levels'
-import type { Bar } from './levels'
+import type { Bar, Level } from './levels'
+import { analyzeLevel } from './levelAnalysis'
+import type { FrameLevels, LevelAnalysis } from './levelAnalysis'
+import { LevelInsights } from './LevelInsights'
 import { DrawingTools } from './DrawingTools'
 import type { DrawingChart } from './DrawingTools'
 import { formatPrice } from './prices'
@@ -33,6 +36,7 @@ export function AutoChart({ symbol, onPrice }: { symbol: string; onPrice: (symbo
   const [status, setStatus] = useState('Завантаження…')
   const [error, setError] = useState(false)
   const [hoveredVolume, setHoveredVolume] = useState<number | null>(null)
+  const [insights, setInsights] = useState<{ identity: string; items: LevelAnalysis[]; unavailableFrames: string[]; updatedAt: number | null } | null>(null)
   const lines = useRef<ISeriesApi<'Line'>[]>([])
   const visible = useRef(showLevels)
 
@@ -57,6 +61,14 @@ export function AutoChart({ symbol, onPrice }: { symbol: string; onPrice: (symbo
     let reconnect: ReturnType<typeof setTimeout> | undefined
     let lastTime = 0
     let readyStatus = ''
+    let analysisBars: Bar[] = []
+    let analysisLevels: Level[] = []
+    let otherFrames: FrameLevels[] = []
+    let unavailableFrames: string[] = []
+    const identity = `${symbol}-${frame}-${day}-${retry}`
+    const refreshInsights = () => {
+      if (!stopped) setInsights({ identity, items: analysisLevels.map((level) => analyzeLevel(level, analysisBars, otherFrames)).sort((a, b) => Math.abs(a.level.price - (analysisBars.at(-1)?.close ?? 0)) - Math.abs(b.level.price - (analysisBars.at(-1)?.close ?? 0))), unavailableFrames, updatedAt: analysisBars.length ? analysisBars[analysisBars.length - 1].time + duration : null })
+    }
     const volumesByTime = new Map<number, number>()
     let hoveredTime: number | null = null
     setHoveredVolume(null)
@@ -95,6 +107,10 @@ export function AutoChart({ symbol, onPrice }: { symbol: string; onPrice: (symbo
           if (hoveredTime === bar.time) setHoveredVolume(bar.volume)
           candles.update({ ...bar, time: bar.time as UTCTimestamp })
           onPrice(symbol, bar.close)
+          if (k.x === true) {
+            analysisBars = [...analysisBars.filter((existing) => existing.time !== bar.time), bar].sort((a, b) => a.time - b.time)
+            refreshInsights()
+          }
           if (bar.time > lastTime) lines.current.forEach((line) => {
             const first = line.data()[0]
             if (first && 'value' in first) line.update({ time: bar.time as UTCTimestamp, value: first.value })
@@ -105,6 +121,7 @@ export function AutoChart({ symbol, onPrice }: { symbol: string; onPrice: (symbo
       socket.onerror = () => socket?.close()
       socket.onclose = () => {
         if (stopped) return
+        setInsights(null)
         setStatus('З’єднання перервано. Відновлення…')
         reconnect = setTimeout(() => setRetry((value) => value + 1), 5000)
       }
@@ -141,6 +158,20 @@ export function AutoChart({ symbol, onPrice }: { symbol: string; onPrice: (symbo
         onPrice(symbol, all[all.length - 1].close)
         lastTime = all[all.length - 1].time
         const levels = findLevels(history)
+        analysisLevels = levels
+        analysisBars = all.filter((bar) => (bar.time + duration) * 1000 <= Date.now())
+        const frameDurations = [{ frame: '1H', seconds: 3600 }, { frame: '4H', seconds: 14400 }, { frame: '1D', seconds: 86400 }].filter((entry) => entry.seconds > duration)
+        unavailableFrames = frameDurations.map((entry) => entry.frame)
+        refreshInsights()
+        void Promise.allSettled(frameDurations.map(async (entry) => {
+          const bars = await fetchBars(symbol, entry.frame, controller.signal)
+          return { frame: entry.frame, levels: findLevels(bars.filter((bar) => (bar.time + entry.seconds) * 1000 <= Date.now())) }
+        })).then((results) => {
+          if (stopped) return
+          otherFrames = results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : [])
+          unavailableFrames = results.flatMap((result, i) => result.status === 'rejected' ? [frameDurations[i].frame] : [])
+          refreshInsights()
+        })
         lines.current = levels.map((level) => {
           const line = chart.addSeries(LineSeries, { color: level.kind === 'high' ? '#3868ff' : '#24b7a5', lineWidth: 2, pointMarkersVisible: false, crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: true, visible: visible.current, priceFormat, autoscaleInfoProvider: () => null })
           line.setData([{ time: level.time as UTCTimestamp, value: level.price }, { time: lastTime as UTCTimestamp, value: level.price }])
@@ -163,6 +194,7 @@ export function AutoChart({ symbol, onPrice }: { symbol: string; onPrice: (symbo
     <div className="local-chart-tools"><strong>{symbol}</strong><div className="chart-timeframes">{frames.map((value) => <button key={value} className={frame === value ? 'tool-active' : ''} onClick={() => setFrame(value)}>{value}</button>)}</div><button aria-pressed={showLevels} className={showLevels ? 'tool-active' : ''} onClick={() => setShowLevels((value) => !value)}>Авто рівні</button></div>
     <div className="levels-status" role="status"><span className="candle-volume">Обсяг: {hoveredVolume === null ? '—' : `${volumeFormatter.format(hoveredVolume)} ${symbol.replace(/USDT$/, '')}`}</span><span className="level-high">● Максимуми</span><span className="level-low">● Мінімуми</span><span>{status}</span>{error && <button onClick={() => setRetry((value) => value + 1)}>Повторити</button>}</div>
     <div className="local-chart" ref={container} />
+    {showLevels && <LevelInsights error={error} items={insights?.identity === `${symbol}-${frame}-${day}-${retry}` ? insights.items : []} frame={frame} pending={!error && insights?.identity !== `${symbol}-${frame}-${day}-${retry}`} unavailableFrames={insights?.identity === `${symbol}-${frame}-${day}-${retry}` ? insights.unavailableFrames : []} updatedAt={insights?.identity === `${symbol}-${frame}-${day}-${retry}` ? insights.updatedAt : null} />}
     <OrderBookDepth key={symbol} symbol={symbol} />
     {drawingApi?.identity === `${symbol}-${frame}-${day}-${retry}` && <DrawingTools key={drawingApi.identity} api={drawingApi} storageKey={`vanta-drawings-v2-${symbol}`} />}
   </div>
