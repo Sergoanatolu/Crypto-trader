@@ -34,6 +34,8 @@ export function AutoChart({ symbol, onPrice, chartRequest }: { symbol: string; o
   const [showLevels, setShowLevels] = useState(true)
   const [status, setStatus] = useState('Завантаження…')
   const [error, setError] = useState(false)
+  const [historyStatus, setHistoryStatus] = useState<'loading' | 'ready' | 'end' | 'error'>('loading')
+  const loadOlderRef = useRef<() => void>(() => {})
   const [hoveredVolume, setHoveredVolume] = useState<number | null>(null)
   const [insights, setInsights] = useState<{ identity: string; items: LevelAnalysis[]; unavailableFrames: string[]; updatedAt: number | null } | null>(null)
   const [selectedLevel, setSelectedLevel] = useState<{ identity: string; time: number; kind: Level['kind']; sourceFrame?: string } | null>(null)
@@ -75,6 +77,10 @@ export function AutoChart({ symbol, onPrice, chartRequest }: { symbol: string; o
     let liveItems: LevelAnalysis[] = []
     let livePrice = 0
     let firstChartTime = 0
+    let loadingOlder = false
+    let historyReady = false
+    let historyEnded = false
+    setHistoryStatus('loading')
     const identity = `${symbol}-${frame}-${day}-${retry}`
     const rebuildLevels = () => {
       lines.current.forEach((line) => chart.removeSeries(line))
@@ -130,6 +136,32 @@ export function AutoChart({ symbol, onPrice, chartRequest }: { symbol: string; o
       setSelectedLevel(nearest ? { identity, time: nearest.time, kind: nearest.kind, sourceFrame: nearest.sourceFrame } : null)
     }
     chart.subscribeClick(handleLevelClick)
+    const loadOlder = async () => {
+      if (stopped || !historyReady || loadingOlder || historyEnded) return
+      loadingOlder = true
+      setHistoryStatus('loading')
+      try {
+        const batch = await fetchBars(symbol, frame, controller.signal, firstChartTime * 1000 - 1)
+        if (stopped) return
+        const older = batch.filter((bar) => bar.time < firstChartTime)
+        if (older.length) {
+          // Read the current series after fetching so live candle updates are retained.
+          const range = chart.timeScale().getVisibleLogicalRange()
+          const current = candles.data()
+          candles.setData([...older.map((bar) => ({ ...bar, time: bar.time as UTCTimestamp })), ...current])
+          older.forEach((bar) => volumesByTime.set(bar.time, bar.volume))
+          firstChartTime = older[0].time
+          if (range) chart.timeScale().setVisibleLogicalRange({ from: range.from + older.length, to: range.to + older.length })
+        }
+        historyEnded = batch.length < 1000 || older.length === 0
+        setHistoryStatus(historyEnded ? 'end' : 'ready')
+      } catch {
+        if (!stopped) setHistoryStatus('error')
+      } finally {
+        loadingOlder = false
+      }
+    }
+    loadOlderRef.current = () => { void loadOlder() }
     const duration = frame === '1W' ? 604800 : frame === '1D' ? 86400 : frame.endsWith('H') ? Number.parseInt(frame) * 3600 : Number.parseInt(frame) * 60
     setDrawingApi({ chart, candles, duration, identity: `${symbol}-${frame}-${day}-${retry}` })
     lines.current = []
@@ -176,10 +208,10 @@ export function AutoChart({ symbol, onPrice, chartRequest }: { symbol: string; o
         const cutoff = dayStart()
         let end = cutoff - 1
         let history: Bar[] = []
-        for (let page = 0; page < 3; page++) {
+        for (let page = 0; page < 5; page++) {
           const batch = await fetchBars(symbol, frame, controller.signal, end)
           history = [...batch, ...history]
-          if (batch.length < 1000) break
+          if (batch.length < 1000) { historyEnded = true; break }
           end = batch[0].time * 1000 - 1
         }
         // A weekly/daily bar returned before midnight may still be forming.
@@ -202,6 +234,8 @@ export function AutoChart({ symbol, onPrice, chartRequest }: { symbol: string; o
         livePrice = all[all.length - 1].close
         lastTime = all[all.length - 1].time
         firstChartTime = all[0].time
+        historyReady = true
+        setHistoryStatus(historyEnded ? 'end' : 'ready')
         analysisBars = all.filter((bar) => (bar.time + duration) * 1000 <= Date.now())
         rebuildLevels()
         const frameDurations = [{ frame: '1H', seconds: 3600 }, { frame: '4H', seconds: 14400 }, { frame: '1D', seconds: 86400 }].filter((entry) => entry.seconds > duration)
@@ -238,6 +272,12 @@ export function AutoChart({ symbol, onPrice, chartRequest }: { symbol: string; o
     <div className="local-chart-tools"><strong>{symbol}</strong><div className="chart-timeframes">{frames.map((value) => <button key={value} className={frame === value ? 'tool-active' : ''} onClick={() => setFrame(value)}>{value}</button>)}</div><button aria-pressed={showLevels} className={showLevels ? 'tool-active' : ''} onClick={() => { setSelectedLevel(null); setShowLevels((value) => !value) }}>Авто рівні</button></div>
     <div className="levels-status" role="status"><span className="candle-volume">Обсяг: {hoveredVolume === null ? '—' : `${volumeFormatter.format(hoveredVolume)} ${symbol.replace(/USDT$/, '')}`}</span><span title="До двох виразних вершин і двох низів. Лінії від тіней свічок вправо; пробиті межі приховано.">Межі руху: {showLevels ? boundaryItems.length : 0}</span><span>{status}</span>{error && <button onClick={() => setRetry((value) => value + 1)}>Повторити</button>}</div>
     <div className="local-chart" ref={container} />
+    <div className="local-chart-tools">
+      <button disabled={historyStatus === 'loading' || historyStatus === 'end' || error} onClick={() => loadOlderRef.current()}>
+        {historyStatus === 'loading' ? 'Завантаження історії…' : historyStatus === 'end' ? 'Уся доступна історія завантажена' : historyStatus === 'error' ? 'Повторити завантаження історії' : 'Ще 1 000 свічок'}
+      </button>
+      <span role="status">{historyStatus === 'error' ? 'Не вдалося завантажити давніші свічки.' : 'Давніші свічки — ліворуч на графіку'}</span>
+    </div>
     {showLevels && selectedInsight && insights && <LevelInsights key={`${identity}-${selectedInsight.level.sourceFrame}-${selectedInsight.level.kind}-${selectedInsight.level.time}`} error={error} items={[selectedInsight]} frame={frame} pending={false} unavailableFrames={insights.unavailableFrames} updatedAt={insights.updatedAt} onClose={() => setSelectedLevel(null)} volumeThreshold={alerts.volume} nearThreshold={alerts.near} onVolumeChange={alerts.setVolume} onNearChange={alerts.setNear} watched={alerts.watched.includes(watchKey(symbol, frame, selectedInsight))} onWatch={() => alerts.toggle(watchKey(symbol, frame, selectedInsight))} />}
     <div className="alert-tray"><button onClick={() => setShowAlerts(!showAlerts)} aria-expanded={showAlerts}>Алерти · {alerts.events.length}</button>
       {showAlerts && <div className="alert-feed"><p>Стеження лише за відкритою монетою та таймфреймом, поки сайт відкритий. Нові події після ввімкнення стеження.</p><button onClick={alerts.clear}>Очистити події</button>{!alerts.events.length && <p>Подій поки немає. Клікніть рівень → «Стежити».</p>}{alerts.events.map((event) => <p key={event.id}>{event.text}</p>)}</div>}
