@@ -12,12 +12,67 @@ import { LevelInsights } from './LevelInsights'
 import { DrawingTools } from './DrawingTools'
 import type { DrawingChart } from './DrawingTools'
 import { formatPrice } from './prices'
+import { Maximize, Minimize } from 'lucide-react'
 
 const frames = ['1m', '5m', '15m', '1H', '4H', '1D', '1W']
 const volumeFormatter = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 8 })
 
 export function AutoChart({ symbol, onPrice, chartRequest }: { symbol: string; onPrice: (symbol: string, price: number) => void; chartRequest?: { id: number; frame: string } }) {
   const container = useRef<HTMLDivElement>(null)
+  const shell = useRef<HTMLDivElement>(null)
+  const fullscreenButton = useRef<HTMLButtonElement>(null)
+  const [nativeFullscreen, setNativeFullscreen] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+  const [fullscreenPending, setFullscreenPending] = useState(false)
+  const isFullscreen = nativeFullscreen || expanded
+
+  useEffect(() => {
+    const sync = () => {
+      const active = document.fullscreenElement === shell.current
+      setNativeFullscreen(active)
+      if (!active) fullscreenButton.current?.focus({ preventScroll: true })
+    }
+    document.addEventListener('fullscreenchange', sync)
+    return () => document.removeEventListener('fullscreenchange', sync)
+  }, [])
+
+  useEffect(() => {
+    if (!expanded) return
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const close = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setExpanded(false)
+        fullscreenButton.current?.focus({ preventScroll: true })
+      }
+    }
+    window.addEventListener('keydown', close)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', close)
+    }
+  }, [expanded])
+
+  const toggleFullscreen = async () => {
+    if (!shell.current || fullscreenPending) return
+    if (expanded) { setExpanded(false); return }
+    setFullscreenPending(true)
+    try {
+      if (document.fullscreenElement === shell.current) {
+        await document.exitFullscreen()
+      } else if (shell.current.requestFullscreen && document.fullscreenEnabled) {
+        try { await shell.current.requestFullscreen() }
+        catch { setExpanded(true) }
+      } else {
+        setExpanded(true)
+      }
+    } catch {
+      // Keep the exit button available if the browser rejects an exit request.
+      setNativeFullscreen(document.fullscreenElement === shell.current)
+    } finally {
+      setFullscreenPending(false)
+    }
+  }
   const [drawingApi, setDrawingApi] = useState<(DrawingChart & { identity: string }) | null>(null)
   const [frame, setFrame] = useState('5m')
   const [appliedRequest, setAppliedRequest] = useState<number>()
@@ -268,8 +323,13 @@ export function AutoChart({ symbol, onPrice, chartRequest }: { symbol: string; o
   const selectedInsight = selectedLevel?.identity === identity && insights?.identity === identity
     ? insights.items.find((item) => item.level.time === selectedLevel.time && item.level.kind === selectedLevel.kind && item.level.sourceFrame === selectedLevel.sourceFrame) : undefined
 
-  return <div className="local-chart-shell auto-chart-shell">
-    <div className="local-chart-tools"><strong>{symbol}</strong><div className="chart-timeframes">{frames.map((value) => <button key={value} className={frame === value ? 'tool-active' : ''} onClick={() => setFrame(value)}>{value}</button>)}</div><button aria-pressed={showLevels} className={showLevels ? 'tool-active' : ''} onClick={() => { setSelectedLevel(null); setShowLevels((value) => !value) }}>Авто рівні</button></div>
+  return <div ref={shell} className={`local-chart-shell auto-chart-shell${isFullscreen ? ' chart-fullscreen' : ''}`}>
+    <div className="chart-header">
+      <div className="local-chart-tools"><strong>{symbol}</strong><div className="chart-timeframes">{frames.map((value) => <button key={value} className={frame === value ? 'tool-active' : ''} onClick={() => setFrame(value)}>{value}</button>)}</div><button aria-pressed={showLevels} className={showLevels ? 'tool-active' : ''} onClick={() => { setSelectedLevel(null); setShowLevels((value) => !value) }}>Авто рівні</button></div>
+      <button ref={fullscreenButton} className="chart-fullscreen-button" type="button" aria-label={isFullscreen ? 'Вийти з повного екрана' : 'На повний екран'} title={isFullscreen ? 'Вийти з повного екрана (Esc)' : 'На повний екран'} aria-pressed={isFullscreen} disabled={fullscreenPending} onClick={() => { void toggleFullscreen() }}>
+        {isFullscreen ? <Minimize size={21} /> : <Maximize size={21} />}
+      </button>
+    </div>
     <div className="levels-status" role="status"><span className="candle-volume">Обсяг: {hoveredVolume === null ? '—' : `${volumeFormatter.format(hoveredVolume)} ${symbol.replace(/USDT$/, '')}`}</span><span title="До двох виразних вершин і двох низів. Лінії від тіней свічок вправо; пробиті межі приховано.">Межі руху: {showLevels ? boundaryItems.length : 0}</span><span>{status}</span>{error && <button onClick={() => setRetry((value) => value + 1)}>Повторити</button>}</div>
     <div className="local-chart" ref={container} />
     <div className="local-chart-tools">
